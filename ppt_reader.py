@@ -6,16 +6,25 @@ from typing import Optional, List
 from extractors.extrator_发包规范 import ExtractorA    
 # 4. 导出图片并生成文档
 from exporters.exporter_发包规范 import ExporterA
+from utils.logger import LoggerFactory
+
+logger = LoggerFactory.create_logger("ppt_reader")
 
 def read_pptx(pptx_path: str, config_loader: ConfigLoader, version: Optional[str] = None) -> List[Slide]:
-    """读取 PPT 文件并返回结构化的幻灯片列表（支持动态标题位置）"""
-    prs = Presentation(pptx_path)
-    slides = []
-    for page_number, slide in enumerate(prs.slides, start=1):  # 页码从1开始
-        # 传递 config_loader 和 version 到 Slide 实例
-        slide_obj = Slide(slide, prs.slide_master, page_number, config_loader, version)
-        slides.append(slide_obj)
-    return slides
+    logger.info(f"开始读取PPT文件: {pptx_path}")
+    try:
+        prs = Presentation(pptx_path)
+        slides = []
+        for page_number, slide in enumerate(prs.slides, start=1):
+            logger.debug(f"处理第 {page_number} 页")
+            slide_obj = Slide(slide, prs.slide_master, page_number, config_loader, version)
+            slides.append(slide_obj)
+        
+        logger.info(f"成功读取 {len(slides)} 页")
+        return slides
+    except Exception as e:
+        logger.error(f"读取PPT文件时出错: {str(e)}", exc_info=True)
+        raise
 
 if __name__ == "__main__":
     # 测试读取逻辑
@@ -44,7 +53,7 @@ if __name__ == "__main__":
     # 创建导出器实例
     exporter = ExporterA(pptx_path, docx_path, output_path)
     # 需要从excel 读取的数据，暂时无特定的表格
-    result["name"] = "Demo测试机器253改247阿德撒旦_adasadjqh"
+    result["name"] = "avbaaa"
     result["Action"] = "大改造"
     success = exporter.process(result)
     

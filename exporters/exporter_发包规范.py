@@ -6,6 +6,7 @@ import comtypes.client
 import time
 from PIL import Image
 from typing import Dict, Any, Tuple
+from utils.logger import LoggerFactory
 
 class ImageExporter:
     """图片导出处理类"""
@@ -81,10 +82,6 @@ class ImageExporter:
                     top_px + height_px
                 ))
                 cropped_img.save(output_path)
-            
-            # 清理临时文件
-            if os.path.exists(temp_output):
-                os.remove(temp_output)
             
             return True
             
@@ -209,25 +206,32 @@ class DocxProcessor:
                             run.add_picture(f, width=Cm(img_width))
                         found_markers.add(marker)
                     except Exception as e:
-                        print(f"Error adding image {marker}: {e}")
+                        self.logger.error(f"添加图片失败 {marker}: {e}")
                     break
         
         not_found = set(image_mappings.keys()) - found_markers
         if not_found:
-            print(f"Warning: Following markers were not found: {', '.join(not_found)}")
+            self.logger.warning(f"以下标记未找到: {', '.join(not_found)}")
 
 class ExporterA:
     """发包规范导出器"""
     def __init__(self, pptx_path: str, docx_template_path: str, output_path: str):
+        self.logger = LoggerFactory.create_logger("Exporter发包规范")
+        self.logger.info("初始化导出器")
+        self.output_path = output_path
         self.image_exporter = ImageExporter(pptx_path)
-        self.docx_processor = DocxProcessor(docx_template_path, output_path)
+        self.docx_processor = DocxProcessor(docx_template_path, self.output_path)
     
     def process(self, result_data: Dict[str, Any]) -> bool:
         try:
+            self.logger.info("开始处理文档")
+            
             # 1. 导出图片到临时目录
+            self.logger.debug("导出图片到临时目录")
             image_paths = self.image_exporter.export_images(result_data)
             
             # 2. 将图片和文本内容插入到文档
+            self.logger.debug("处理替换内容")
             replacements = {}
             # 添加非图片字段
             replacements.update({
@@ -243,15 +247,16 @@ class ExporterA:
                 for k, path in image_paths.items()
             })
             
-            success = self.docx_processor.process_content(replacements)
+            self.docx_processor.process_content(replacements)
             
+            self.logger.info(f"文档生成成功: {self.output_path}")
             # 3. 清理临时文件
             self.image_exporter._clean_temp_files()
             
-            return success
-        
+            return True
+            
         except Exception as e:
-            print(f"Error processing document: {e}")
+            self.logger.error(f"处理文档时出错: {e}", exc_info=True)
             self.image_exporter._clean_temp_files()
             return False
 

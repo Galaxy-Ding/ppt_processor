@@ -1,95 +1,108 @@
 # src/office_ops/ppt_processor/extractors/extractor_a.py
 # 实现需求A：提取指定页面的标题等字段并导出为 发包规范
-
+import os
+import yaml
 from typing import List, Dict
 from extractors.base_extrator import BaseExtractor
 from content_models import Slide, calculate_iou
-from config.filelds_config import FIELDS_CONFIG
-from utils.text_utils import  split_after_colon  # 确保已导入
+# from config.filelds_config import FIELDS_CONFIG
+from config.fields_loader import FIELDS_CONFIG
+from utils.text_utils import split_after_colon  # 确保已导入
+from utils.logger import LoggerFactory
 import re
 import math
 
 class ExtractorA(BaseExtractor):
     """需求A提取器（支持多类型 shape 提取）"""
     def __init__(self, slides: List[Slide]):
+        self.logger = LoggerFactory.create_logger("Extractor_发包规范")
+        self.logger.info("初始化提取器")
         super().__init__(slides)
-        self.config = FIELDS_CONFIG["发包规范V1"]
+        self.config = FIELDS_CONFIG.get("发包规范V1", {})
+        if not self.config:
+            self.logger.warning("未找到发包规范V1的配置，请检查config/filelds_config.yaml文件")
+
 
     def _calc_utilization_rate(self, failure_rate: str) -> str:
-        """
-        根据故障率字符串自动计算利用率（百分比取反），如 '≤1.23%' -> '≥98.77%'
-        """
-        import re
-        # 去掉所有空格
-        failure_rate = failure_rate.replace(" ", "")
-        match = re.search(r"([≤<]?)(\d+(\.\d+)?)%", failure_rate)
-        if match:
-            num = float(match.group(2))
-            utilization = 100 - num
-            # 保留两位小数
-            return f"≥ {utilization:.2f}%"
-        return ""
+            """
+            根据故障率字符串自动计算利用率（百分比取反），如 '≤1.23%' -> '≥98.77%'
+            """
+            import re
+            # 去掉所有空格
+            failure_rate = failure_rate.replace(" ", "")
+            match = re.search(r"([≤<]?)(\d+(\.\d+)?)%", failure_rate)
+            if match:
+                num = float(match.group(2))
+                utilization = 100 - num
+                # 保留两位小数
+                return f"≥ {utilization:.2f}%"
+            return ""
 
     def extract(self) -> Dict:
-        flat_result = {}
+        self.logger.info("开始提取内容")
+        try:
+            flat_result = {}
 
-        # 处理 master 字段（用 master_shapes 匹配）
-        master_cfg = self.config.get("master", {})
-        if master_cfg:
-            for field, pos_dict in master_cfg.items():
-                for key, position in pos_dict.items():
-                    # 遍历所有 slide，查找 master_shapes
-                    for slide in self.slides:
-                        for shape in slide.get("master_shapes", []):
-                            iou = calculate_iou(shape["box"], position)
-                            if iou > 0.3:
-                                # 只取第一个匹配
-                                flat_result[key] = shape.get("text", "")
-                                break
+            # 处理 master 字段（用 master_shapes 匹配）
+            master_cfg = self.config.get("master", {})
+            if master_cfg:
+                for field, pos_dict in master_cfg.items():
+                    for key, position in pos_dict.items():
+                        # 遍历所有 slide，查找 master_shapes
+                        for slide in self.slides:
+                            for shape in slide.get("master_shapes", []):
+                                iou = calculate_iou(shape["box"], position)
+                                if iou > 0.3:
+                                    # 只取第一个匹配
+                                    flat_result[key] = shape.get("text", "")
+                                    break
 
-        # 按 page 定位
-        for page_num, page_cfg in self.config.get("page", {}).items():
-            slide = self._get_slide_by_page(int(page_num))
-            if not slide:
-                continue
-            for field, iou_cfg in page_cfg.get("iou", {}).items():
-                box = iou_cfg.get("box")
-                need_split = iou_cfg.get("need_split")
-                storage_vars = iou_cfg.get("storage_var")
-                # IOU 匹配 shape
-                for shape in slide["shapes"]:
-                    iou = calculate_iou(shape["box"], box)
-                    if iou > 0.3:
-                        text = shape.get("text", "")
-                        if need_split and isinstance(storage_vars, list):
-                            parts = text.split(need_split)
-                            for idx, var in enumerate(storage_vars):
-                                if var and idx < len(parts):
-                                    flat_result[var] = parts[idx]
-                        else:
-                            flat_result[field] = text
-                        break
+            # 按 page 定位
+            for page_num, page_cfg in self.config.get("page", {}).items():
+                slide = self._get_slide_by_page(int(page_num))
+                if not slide:
+                    continue
+                for field, iou_cfg in page_cfg.get("iou", {}).items():
+                    box = iou_cfg.get("box")
+                    need_split = iou_cfg.get("need_split")
+                    storage_vars = iou_cfg.get("storage_var")
+                    # IOU 匹配 shape
+                    for shape in slide["shapes"]:
+                        iou = calculate_iou(shape["box"], box)
+                        if iou > 0.3:
+                            text = shape.get("text", "")
+                            if need_split and isinstance(storage_vars, list):
+                                parts = text.split(need_split)
+                                for idx, var in enumerate(storage_vars):
+                                    if var and idx < len(parts):
+                                        flat_result[var] = parts[idx]
+                            else:
+                                flat_result[field] = text
+                            break
 
-        # 按 title 定位
-        for title_cfg in self.config.get("title", []):
-            slide = self._get_slide_by_title(title_cfg["first"], title_cfg.get("second", ""))
-            if not slide:
-                continue
-            # re 匹配文本字段
-            for field, field_cfg in title_cfg.get("re", {}).items():
-                storage_var = field
-                flat_result[storage_var] = self._extract_text_by_re(slide, field, field_cfg)
-            # table 匹配表格字段
-            for field, field_cfg in title_cfg.get("table", {}).items():
-                storage_var = field
-                flat_result[storage_var] = self._extract_table_last_row(slide, field_cfg["match_key_string"])
+            # 按 title 定位
+            for title_cfg in self.config.get("title", []):
+                slide = self._get_slide_by_title(title_cfg["first"], title_cfg.get("second", ""))
+                if not slide:
+                    continue
+                # re 匹配文本字段
+                for field, field_cfg in title_cfg.get("re", {}).items():
+                    storage_var = field
+                    flat_result[storage_var] = self._extract_text_by_re(slide, field, field_cfg)
+                # table 匹配表格字段
+                for field, field_cfg in title_cfg.get("table", {}).items():
+                    storage_var = field
+                    flat_result[storage_var] = self._extract_table_last_row(slide, field_cfg["match_key_string"])
 
-        # 自动补充 dev_utilization_rate 字段
-        failure_rate = flat_result.get("dev_failure_rate", "")
-        if failure_rate and isinstance(failure_rate, str):
-            flat_result["dev_utilization_rate"] = self._calc_utilization_rate(failure_rate)
+            # 自动补充 dev_utilization_rate 字段
+            failure_rate = flat_result.get("dev_failure_rate", "")
+            if failure_rate and isinstance(failure_rate, str):
+                flat_result["dev_utilization_rate"] = self._calc_utilization_rate(failure_rate)
 
-        return flat_result
+            self.logger.info("内容提取完成")
+            return flat_result
+        except Exception as e:
+            self.logger.error(f"提取内容时出错: {str(e)}", exc_info=True)
 
     def _get_slide_by_page(self, page_number: int):
         for slide in self.slides:
@@ -250,7 +263,6 @@ class ExtractorA(BaseExtractor):
     def _extract_table_last_row(self, slide, field_name):
         for shape in slide["shapes"]:
             if shape["type"] == "Table":
-                a = shape["last_row"].get(field_name, "")
                 return shape["last_row"].get(field_name, "")
         return None
 
@@ -275,5 +287,5 @@ if __name__ == "__main__":
     # 测试提取
     extractor = ExtractorA(slides_dicts)
     result = extractor.extract()
-    print("\n发包规范字段提取结果:")
-    print(result)
+    print("字段提取完成")
+    print(f"提取结果: {result}")

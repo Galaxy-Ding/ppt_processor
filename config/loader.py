@@ -1,43 +1,57 @@
-# src/office_ops/config/loader.py
+import os
 import yaml
-from pathlib import Path
-from typing import Dict, Any, Optional, List
-
+from typing import Dict, Any
 
 class ConfigLoader:
-    """配置文件加载器（支持YAML）"""
-
+    """增强版配置加载器，支持动态配置更新"""
+    
     def __init__(self, config_dir: str = "config"):
-        self.config_dir = Path(config_dir)
-        self.title_positions: Dict[str, Dict[str, List[float]]] = {}  # 版本→标题位置映射
-        self._load_configs()
-
-    def _load_configs(self) -> None:
-        """加载所有配置文件（当前仅需标题位置）"""
-        title_config_path = self.config_dir / "title_positions.yaml"
-        if not title_config_path.exists():
-            raise FileNotFoundError(f"标题位置配置文件不存在：{title_config_path}")
-
-        with open(title_config_path, "r", encoding="utf-8") as f:
-            config_data = yaml.safe_load(f)
-            self.title_positions = config_data.get("versions", {})
-
-    def get_title_position(self, version: Optional[str] = None) -> Dict[str, List[float]]:
-        """
-        获取指定版本的标题位置配置
-        :param version: 版本号（如"v1"），未指定时使用默认版本
-        :return: 标题位置字典（{"title": [...], "second_title": [...]}）
-        """
-        # 确定目标版本
-        target_version = version or self.title_positions.get("default", "v1")
-        if target_version not in self.title_positions:
-            raise ValueError(f"未支持的版本号：{target_version}，可用版本：{list(self.title_positions.keys())}")
-
-        return self.title_positions[target_version]
-
-
-if __name__ == "__main__":
-    # 测试配置加载
-    config_loader = ConfigLoader(config_dir="config")
-    print("配置加载结果:")
-    print(config_loader.get_config("发包规范V1"))
+        self.config_dir = config_dir
+        self.config = self._load_all_configs()
+        
+    def _load_all_configs(self) -> Dict[str, Any]:
+        """加载所有配置文件"""
+        configs = {}
+        
+        # 加载主配置文件
+        main_config = os.path.join(self.config_dir, "app_settings.yaml")
+        if os.path.exists(main_config):
+            with open(main_config, 'r', encoding='utf-8') as f:
+                configs.update(yaml.safe_load(f))
+        
+        # 加载字段配置
+        fields_config = os.path.join(self.config_dir, "filelds_config.yaml")
+        if os.path.exists(fields_config):
+            with open(fields_config, 'r', encoding='utf-8') as f:
+                configs.update(yaml.safe_load(f))
+                
+        return configs
+    
+    def get_template_path(self) -> str:
+        """获取模板文件路径"""
+        templates = self.config.get('templates', {})
+        docx_path = templates.get('docx', {}).get('path', 'templates')
+        filename = templates.get('docx', {}).get('filename', '')
+        return os.path.join(docx_path, filename)
+    
+    def get_log_config(self) -> Dict[str, Any]:
+        """获取日志配置"""
+        return self.config.get('logs', {})
+    
+    def save_current_config(self, config_path: str = None):
+        """保存当前配置到文件"""
+        if not config_path:
+            config_path = os.path.join(self.config_dir, "current_settings.yaml")
+            
+        with open(config_path, 'w', encoding='utf-8') as f:
+            yaml.safe_dump(self.config, f)
+            
+    def update_config(self, key: str, value: Any):
+        """更新配置项"""
+        keys = key.split('.')
+        current = self.config
+        for k in keys[:-1]:
+            if k not in current:
+                current[k] = {}
+            current = current[k]
+        current[keys[-1]] = value

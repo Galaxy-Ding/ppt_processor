@@ -3,7 +3,8 @@ import re
 from pptx.enum.shapes import MSO_SHAPE_TYPE, MSO_AUTO_SHAPE_TYPE
 from pptx.dml.color import RGBColor
 from typing import List, Dict, Optional, Tuple
-from config.loader import ConfigLoader  # 导入配置加载器
+from config.loader import ConfigLoader
+from utils.logger import LoggerFactory
 
 # ------------------------------ 静态工具方法 ------------------------------
 def calculate_iou(box1: Tuple[float, float, float, float],
@@ -251,6 +252,7 @@ class CustomShape(BaseShape):
 
     def __init__(self, shape):
         super().__init__(shape)
+        self.logger = LoggerFactory.create_logger("CustomShape")
         self.shape_type = self._get_shape_type()
          # 类型标准化：如果是枚举类型，优先用 .name
         shape_type_str = str(self.shape_type)
@@ -314,14 +316,17 @@ class CustomShape(BaseShape):
         return True
     def _get_shape_type(self):
         try:
+
             # 只对 AutoShape 类型访问 auto_shape_type
-            MSO_SHAPE_TYPE.AUTO_SHAPE
-            if self.shape.shape_type == 1:  # MSO_SHAPE_TYPE.AUTO_SHAPE
+            #
+            # self.logger.info(f"type is {str(self.shape.shape_type)}")
+            if self.shape.shape_type == 1 and "Line" not in self.shape.name:  # MSO_SHAPE_TYPE.AUTO_SHAPE
                 return getattr(self.shape, "auto_shape_type", "")
             else:
                 return str(self.shape.shape_type)
-        except Exception:
-            print(f"exception : {str(self.shape.shape_type)}")
+        except Exception as e:
+            self.logger.error(f"获取形状类型失败: {e}")
+            print(dir(self.shape))
             return str(self.shape.shape_type)
 
     def _get_fill_color(self) -> str:
@@ -413,10 +418,10 @@ class Slide:
 
     def __init__(self, slide, slide_master, page_number: int, config_loader: ConfigLoader,
                  version: Optional[str] = None):
+        self.logger = LoggerFactory.create_logger("Slide")
+        self.logger.debug(f"初始化第 {page_number} 页")
         self.slide = slide
         self.page_number = page_number  # 页码从1开始
-        if page_number == 7:
-            print()
         self.slide_master = slide_master
         self.shapes = self._parse_shapes()
         self.master_shapes = self._parse_master_shapes()
@@ -434,32 +439,27 @@ class Slide:
 
     # ------------------------------ 标题提取方法 ------------------------------
     def extract_titles(self) -> None:
-        """从当前幻灯片提取标题和副标题（基于动态配置的位置）"""
+        self.logger.debug(f"开始提取第 {self.page_number} 页标题")
         for shape in self.shapes:
-            # 筛选文本框或矩形自定义形状
             is_text_shape = (
-                    isinstance(shape, TextBox) or
-                    (isinstance(shape, CustomShape) and shape.shape_type == "矩形")
+                isinstance(shape, TextBox) or
+                (isinstance(shape, CustomShape) and shape.shape_type == "矩形")
             )
             if not is_text_shape or is_empty(shape.text_content):
                 continue
 
-            # 获取当前形状的坐标（左, 上, 宽, 高）
             box = (shape.left, shape.top, shape.width, shape.height)
-
-            if self.page_number == 5:
-                print()
-            # 判断是否为主标题（基于动态加载的 title_position）
             if self._is_title_box(box, self.title_position) and self._validate_size(shape.text_content, 27.0):
                 self.title = shape.text_content.strip()
+                self.logger.debug(f"找到主标题: {self.title}")
 
-            # 判断是否为副标题（页码>3时生效，基于动态加载的 second_title_position）
-            if (
-                    self.page_number > 3 and
-                    self._is_title_box(box, self.second_title_position) and
-                    self._validate_size(shape.text_content, 20.0)
-            ):
+            if (self.page_number > 3 and
+                self._is_title_box(box, self.second_title_position) and
+                self._validate_size(shape.text_content, 20.0)):
                 self.second_title = shape.text_content.strip()
+                self.logger.debug(f"找到副标题: {self.second_title}")
+
+        self.logger.debug(f"第 {self.page_number} 页标题提取完成")
 
     @staticmethod
     def _is_title_box(box: Tuple[float, float, float, float],
@@ -507,35 +507,43 @@ class Slide:
             return True  # 无匹配，验证不通过
 
         unique_formats = set(size_list)  # 去重后的不同格式
-        print(
+        self.logger.warning(
             f"警告：幻灯片 {self.page_number} 发现{len(size_list)}个表示{target_value}pt的字符串，格式为：{unique_formats}")
         return False  # 存在多个/零个匹配，验证不通过
 
     # ------------------------------ 原有方法 ------------------------------
     def _parse_shapes(self) -> List[BaseShape]:
-        """解析当前页的所有形状（原逻辑）"""
+        self.logger.debug(f"开始解析第 {self.page_number} 页形状")
         shapes = []
-        for shape in self.slide.shapes:
-            if shape.shape_type == MSO_SHAPE_TYPE.TEXT_BOX:
-                shapes.append(TextBox(shape))
-            elif shape.shape_type == MSO_SHAPE_TYPE.TABLE:
-                shapes.append(Table(shape))
-            elif shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
-                shapes.append(Image(shape))
-            elif shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE:
-                shapes.append(CustomShape(shape))  # 假设CustomShape已定义
-            elif shape.shape_type == MSO_SHAPE_TYPE.GROUP:
-                shapes.append(GroupShape(shape))  # 处理群组形状
-        return shapes
+        try:
+            for shape in self.slide.shapes:
+                if shape.shape_type == MSO_SHAPE_TYPE.TEXT_BOX:
+                    shapes.append(TextBox(shape))
+                elif shape.shape_type == MSO_SHAPE_TYPE.TABLE:
+                    shapes.append(Table(shape))
+                elif shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                    shapes.append(Image(shape))
+                elif shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE:
+                    shapes.append(CustomShape(shape))
+                elif shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                    shapes.append(GroupShape(shape))
+            self.logger.debug(f"第 {self.page_number} 页解析到 {len(shapes)} 个形状")
+            return shapes
+        except Exception as e:
+            self.logger.error(f"解析形状时出错: {e}", exc_info=True)
 
     def _parse_master_shapes(self) -> List[BaseShape]:
-        """解析母版中的文本框（原逻辑）"""
+        self.logger.debug("开始解析母版形状")
         master_shapes = []
-        for layout in self.slide_master.slide_layouts:
-            for shape in layout.shapes:
-                if shape.shape_type == MSO_SHAPE_TYPE.TEXT_BOX:
-                    master_shapes.append(TextBox(shape))
-        return master_shapes
+        try:
+            for layout in self.slide_master.slide_layouts:
+                for shape in layout.shapes:
+                    if shape.shape_type == MSO_SHAPE_TYPE.TEXT_BOX:
+                        master_shapes.append(TextBox(shape))
+            self.logger.debug(f"解析到 {len(master_shapes)} 个母版形状")
+            return master_shapes
+        except Exception as e:
+            self.logger.error(f"解析母版形状时出错: {e}", exc_info=True)
 
     def to_dict(self) -> Dict:
         """结构化输出（包含标题）"""
@@ -551,22 +559,27 @@ class GroupShape(BaseShape):
     """群组形状，包含多个子 shape"""
     def __init__(self, shape):
         super().__init__(shape)
+        self.logger = LoggerFactory.create_logger("GroupShape")
+        self.logger.debug("初始化群组形状")
         self.type = "Group"
         self.shapes = []
 
-        # 递归解析所有子 shape
-        for sub_shape in shape.shapes:
-            if sub_shape.shape_type == MSO_SHAPE_TYPE.TEXT_BOX:
-                self.shapes.append(TextBox(sub_shape))
-            elif sub_shape.shape_type == MSO_SHAPE_TYPE.TABLE:
-                self.shapes.append(Table(sub_shape))
-            elif sub_shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
-                self.shapes.append(Image(sub_shape))
-            elif sub_shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE:
-                self.shapes.append(CustomShape(sub_shape))  # 假设CustomShape已定义
-            elif sub_shape.shape_type == MSO_SHAPE_TYPE.GROUP:
-                self.shapes.append(GroupShape(sub_shape))  # 处理群组形状
-
+        try:
+            for sub_shape in shape.shapes:
+                if sub_shape.shape_type == MSO_SHAPE_TYPE.TEXT_BOX:
+                    self.shapes.append(TextBox(sub_shape))
+                elif sub_shape.shape_type == MSO_SHAPE_TYPE.TABLE:
+                    self.shapes.append(Table(sub_shape))
+                elif sub_shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                    self.shapes.append(Image(sub_shape))
+                elif sub_shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE:
+                    self.shapes.append(CustomShape(sub_shape))
+                elif sub_shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                    self.shapes.append(GroupShape(sub_shape))
+            self.logger.debug(f"群组形状解析完成，包含 {len(self.shapes)} 个子形状")
+        except Exception as e:
+            self.logger.error(f"解析群组形状时出错: {e}", exc_info=True)
+    
     def to_dict(self):
         return {
             "type": self.type,

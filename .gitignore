@@ -3,4 +3,6 @@
 __pycache__/
 *.pyc
 .idea/
+.temp/logs/
 *.log
+.gitignore

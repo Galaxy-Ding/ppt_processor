@@ -1,0 +1,44 @@
+# 文件夹结构配置
+folder_structure:
+  level: 4  # 默认4级目录
+  paths:
+    1:
+      description: "一级目录结构 - 直接搜索PPT"
+      pattern: 
+        - "*.pptx"
+    2:
+      description: "二级目录结构 - 工程文件夹/PPT"
+      pattern: 
+        - "*/*/*.pptx"
+    3:
+      description: "三级目录结构 - 版本代号/工程/PPT"
+      folders: 
+        - "25x"
+        - "26x"
+      pattern: 
+        - "*/*/*/*.pptx"
+    4:
+      description: "四级目录结构 - 材质/版本代号/工程/PPT"
+      folders:
+        level1: 
+          - "铝件"
+          - "钢件"
+        level2: 
+          - "25x"
+          - "26x"
+      pattern: 
+        - "*/*/*/*/*.pptx"
+
+# 模板配置
+templates:
+  docx:
+    path: "templates"  # 相对于root目录
+    filename: "26xdemo1.docx"
+
+
+
+# 日志配置
+logs:
+  path: "logs"  # 相对于root目录
+  format: "%Y-%m-%d"  # 日期格式
+  retention_days: 30  # 日志保留天数
