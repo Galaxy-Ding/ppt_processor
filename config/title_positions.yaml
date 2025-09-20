@@ -1,0 +1,14 @@
+# config/title_positions.yaml
+versions:
+  # 版本1（示例）
+  v1:
+    title: [8.0, 0.6, 9.4, 1.4]       # (left, top, width, height) 单位cm
+    second_title: [0.1, 2.2, 5.9, 1.0]
+
+  # 版本2（假设另一个模板） 后续版本配置
+#  v2:
+#    title: [7.5, 0.5, 9.0, 1.3]
+#    second_title: [0.2, 2.3, 5.8, 1.1]
+
+  # 默认版本（未指定版本时使用）
+  default: v1
