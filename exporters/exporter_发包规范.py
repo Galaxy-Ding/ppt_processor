@@ -2,34 +2,32 @@ from docx import Document
 from docx.shared import Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import os
+from pathlib import Path
 import comtypes.client
 import time
 from PIL import Image
 from typing import Dict, Any, Tuple
 from utils.logger import LoggerFactory
+# 获取当前文件的绝对路径的根目录
+current_file_path = Path(__file__).resolve()
+main_dir = current_file_path.parent.parent  # 项目根目录（ppt_processor/）
+
 
 class ImageExporter:
     """图片导出处理类"""
-    def __init__(self, pptx_path: str, temp_dir: str = r"D:\pythonf\ppt_processor\.temp"):
+    def __init__(self, pptx_path: str):
         """
         初始化导出器
         
         Args:
             pptx_path: PowerPoint文件路径
-            temp_dir: 临时文件目录
         """
+        self.logger = LoggerFactory.create_logger("ImageExporter")
         self.pptx_path = pptx_path
-        
-        # 检查临时目录是否为绝对路径
-        if not os.path.isabs(temp_dir):
-            raise ValueError(
-                "临时目录必须是绝对路径！"
-                f"当前路径 '{temp_dir}' 是相对路径。"
-                "请使用完整的绝对路径，例如: 'D:\\path\\to\\.temp'"
-            )
-        
-        self.temp_dir = temp_dir
+        self.temp_dir = os.path.join(main_dir, ".temp")
         self._ensure_temp_dir()
+        self.logger.debug(f"temp_dir: {self.temp_dir}")
+        self.logger.debug(f"pptx_path: {self.pptx_path}")
         
         # 初始化PowerPoint类型库
         try:
@@ -101,6 +99,10 @@ class ImageExporter:
             os.makedirs(self.temp_dir)
     
     def _clean_temp_files(self):
+        # if self.logger.log_level < 20:
+        #     if self.logger:
+        #         self.logger.debug("DEBUG等级下，跳过临时文件删除。")
+        #     return
         for file in os.listdir(self.temp_dir):
             file_path = os.path.join(self.temp_dir, file)
             try:
@@ -111,6 +113,7 @@ class ImageExporter:
 
     def export_images(self, extracted_data: Dict[str, Any]) -> Dict[str, str]:
         image_paths = {}
+        # 遍历提取的数据
         for field_name, data in extracted_data.items():
             if isinstance(data, dict) and "box" in data and "page_number" in data:
                 temp_file = os.path.join(self.temp_dir, f"{field_name}.png")
@@ -131,6 +134,7 @@ class DocxProcessor:
         self.docx_path = docx_path
         self.output_path = output_path
         self.doc = None
+        self.logger = LoggerFactory.create_logger("DocxProcessor")
         
     def process_content(self, replacements: Dict[str, Any]) -> bool:
         try:
@@ -221,7 +225,10 @@ class ExporterA:
         self.output_path = output_path
         self.image_exporter = ImageExporter(pptx_path)
         self.docx_processor = DocxProcessor(docx_template_path, self.output_path)
-    
+        self.logger.debug("pptx_path: %s", pptx_path)
+        self.logger.debug("output_path: %s", output_path)
+        self.logger.debug("docx_template_path: %s", docx_template_path)
+
     def process(self, result_data: Dict[str, Any]) -> bool:
         try:
             self.logger.info("开始处理文档")

@@ -1,6 +1,7 @@
 import os
 import yaml
 from typing import Dict, Any
+from utils.logger import LoggerFactory
 
 class ConfigLoader:
     """增强版配置加载器，支持动态配置更新"""
@@ -8,6 +9,7 @@ class ConfigLoader:
     def __init__(self, config_dir: str = "config"):
         self.config_dir = config_dir
         self.config = self._load_all_configs()
+        self.logger = LoggerFactory.create_logger("通用loader")
         
     def _load_all_configs(self) -> Dict[str, Any]:
         """加载所有配置文件"""
@@ -23,6 +25,12 @@ class ConfigLoader:
         fields_config = os.path.join(self.config_dir, "filelds_config.yaml")
         if os.path.exists(fields_config):
             with open(fields_config, 'r', encoding='utf-8') as f:
+                configs.update(yaml.safe_load(f))
+
+        # 加载title配置
+        title_config = os.path.join(self.config_dir, "title_positions.yaml")
+        if os.path.exists(title_config):
+            with open(title_config, 'r', encoding='utf-8') as f:
                 configs.update(yaml.safe_load(f))
                 
         return configs
@@ -45,6 +53,10 @@ class ConfigLoader:
             
         with open(config_path, 'w', encoding='utf-8') as f:
             yaml.safe_dump(self.config, f)
+
+    def get_title_position(self, version: str = "v1") -> Dict[str, Any]:
+        """获取日志配置"""
+        return self.config.get("versions").get(version, {})
             
     def update_config(self, key: str, value: Any):
         """更新配置项"""

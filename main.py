@@ -1,15 +1,13 @@
 import sys
 from PyQt5.QtWidgets import QApplication
-from ui.main_window import MainWindow
+from ui.发包规范_window_ui import PPTProcessorGUI
+from ui.demo_ui import DemoMainWindow
 
 def main():
     """主函数"""
     app = QApplication(sys.argv)
-    
-    # 创建主窗口
-    window = MainWindow()
+    window = DemoMainWindow()
     window.show()
-    
     sys.exit(app.exec_())
 
 if __name__ == "__main__":

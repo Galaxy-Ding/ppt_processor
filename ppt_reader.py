@@ -10,7 +10,7 @@ from utils.logger import LoggerFactory
 
 logger = LoggerFactory.create_logger("ppt_reader")
 
-def read_pptx(pptx_path: str, config_loader: ConfigLoader, version: Optional[str] = None) -> List[Slide]:
+def test_read_pptx(pptx_path: str, config_loader: ConfigLoader, version: Optional[str] = None) -> List[Slide]:
     logger.info(f"开始读取PPT文件: {pptx_path}")
     try:
         prs = Presentation(pptx_path)
@@ -26,6 +26,7 @@ def read_pptx(pptx_path: str, config_loader: ConfigLoader, version: Optional[str
         logger.error(f"读取PPT文件时出错: {str(e)}", exc_info=True)
         raise
 
+
 if __name__ == "__main__":
     # 测试读取逻辑
     pptx_path = r"D:\pythonf\26xdemo2.pptx"
@@ -37,7 +38,7 @@ if __name__ == "__main__":
     config_loader = ConfigLoader(config_dir="config")
 
     # 2. 读取 PPT 并结构化
-    slides = read_pptx(pptx_path, config_loader, version)
+    slides = test_read_pptx(pptx_path, config_loader, version)
 
     slides_dicts = []
     for slide in slides:

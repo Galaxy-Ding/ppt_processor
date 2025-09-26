@@ -32,7 +32,7 @@ folder_structure:
 # 模板配置
 templates:
   docx:
-    path: "templates"  # 相对于root目录
+    path: "examples/templates"  # 相对于root目录
     filename: "26xdemo1.docx"
 
 
@@ -42,3 +42,7 @@ logs:
   path: "logs"  # 相对于root目录
   format: "%Y-%m-%d"  # 日期格式
   retention_days: 30  # 日志保留天数
+
+# 默认目录配置
+default_dirs:
+  - "D:\\方案"  # 示例项目目录

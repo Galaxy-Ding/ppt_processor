@@ -1,0 +1,245 @@
+import sys
+import os
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QFileDialog,
+                             QPushButton, QLabel, QTextEdit, QCheckBox,
+                             QComboBox, QMessageBox, QLineEdit)
+from PyQt5 import uic
+from PyQt5.QtGui import QFont
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QPainter, QColor
+from PyQt5.QtGui import QPainter, QColor
+from utils.logger import LoggerFactory
+from config.loader import ConfigLoader
+from PyQt5.QtCore import QThread, pyqtSignal
+# 初始化处理器
+from core.packing_file_发包规范 import PackingFileProcessor
+
+# 后台处理线程
+class ProcessThread(QThread):
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+    log_signal = pyqtSignal(str)
+    def __init__(self, processor, selected_dir):
+        super().__init__()
+        self.processor = processor
+        self.selected_dir = selected_dir
+    def emit_log(self, msg):
+        self.log_signal.emit(msg)
+    def run(self):
+        try:
+            self.processor.set_log_callback(self.emit_log)
+            results = self.processor.process_generate_reports(self.selected_dir)
+            self.finished.emit(results)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class DemoMainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        # 加载UI
+        uic.loadUi("d:/pythonf/ppt_processor/ui/demo.ui", self)
+        self.setWindowTitle("发包规范一键生成工具")
+
+        # 初始化配置和日志
+        self.configs = ConfigLoader()
+        self.logger = LoggerFactory.create_logger("DemoUI")
+        self.processor = None
+        self.selected_dirs = []
+
+        # 绑定控件
+        self._bind_widgets()
+        self._connect_signals()
+        # 美化界面
+        self.apply_style()
+
+        self.processor = PackingFileProcessor(
+            self.configs
+        )
+
+
+    
+    def apply_style(self):
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #f0f0f0;
+            }
+            QWidget {
+                font-family: 'Microsoft YaHei', Arial, sans-serif;
+            }
+            QPushButton#selectDirBtn {
+                background-color: #4a86e8;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton#selectDirBtn:hover {
+                background-color: #3a76d8;
+            }
+            QPushButton#selectDirBtn:pressed {
+                background-color: #2a66c8;
+            }
+            QPushButton#generateBtn {
+                background-color: #4caf50;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton#generateBtn:hover {
+                background-color: #3d9a40;
+            }
+            QPushButton#generateBtn:pressed {
+                background-color: #2e8b30;
+            }
+            QTextEdit {
+                background-color: white;
+                border: 1px solid #d0d0d0;
+                border-radius: 4px;
+                padding: 8px;
+                font-family: 'Consolas', 'Courier New', monospace;
+            }
+            QComboBox {
+                padding: 5px;
+                border: 1px solid #d0d0d0;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QLabel {
+                color: #333333;
+            }
+        """)
+        font = QFont("Microsoft YaHei", 9)
+        QApplication.setFont(font)
+
+    def setup_logger(self, log_config: dict = {}):
+        """设置日志记录器"""
+        if log_config:
+            log_path = log_config.get('path', '../logs')
+            os.makedirs(log_path, exist_ok=True)
+
+            return LoggerFactory.create_logger(
+                "PPTProcessorGUI",
+                log_level=log_config.get('level', 'INFO'),
+                log_file=os.path.join(log_path, 'ppt_processor.log'),
+                retention_days=log_config.get('retention_days', 30)
+            )
+
+
+    def _bind_widgets(self):
+        # 这些名称需与demo.ui中的objectName一致
+        self.select_dir_btn = self.findChild(type(self.select_dir_btn), "select_dir_btn")
+        self.selected_dir_label = self.findChild(type(self.selected_dir_label), "selected_dir_label")
+        self.generate_btn = self.findChild(type(self.generate_btn), "generate_btn")
+        self.log_level_combo = self.findChild(QComboBox, "log_level_combo")
+        self.log_display = self.findChild(QTextEdit, "log_display")
+        self.status_label = self.findChild(type(self.status_label), "status_label")
+        self.manual_proj_name = self.findChild(QLineEdit, "manual_txt_proj_name")
+        self.manual_proj_type = self.findChild(QComboBox, "manual_proj_type_combo")
+        self.auto_proj_name = self.findChild(QLineEdit, "auto_txt_proj_name")
+        self.auto_proj_type = self.findChild(QComboBox, "auto_project_type_label")
+        self.read_project_status = self.findChild(QCheckBox, "chBox_read_ProjectStatus") # 状态圆如用自定义控件可用
+
+    def _connect_signals(self):
+        self.select_dir_btn.clicked.connect(self.select_directories)
+        self.generate_btn.clicked.connect(self.generate_output)
+        self.log_level_combo.currentTextChanged.connect(self.change_log_level)
+
+    def select_directories(self):
+        """选择多个目录，显示所有已选目录"""
+        default_dir = os.getcwd()
+        if isinstance(self.configs.config, dict) and 'default_dirs' in self.configs.config:
+            if isinstance(self.configs.config['default_dirs'], list) and len(self.configs.config['default_dirs']) > 0:
+                default_dir = os.path.abspath(self.configs.config['default_dirs'][0])
+                if not os.path.exists(default_dir):
+                    default_dir = os.getcwd()
+                    self.logger.warning(f"配置的默认目录不存在，使用当前目录: {default_dir}")
+
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        folderName = QFileDialog.getExistingDirectory(self, "选择文件夹", default_dir, options=options)
+        if folderName:
+            if folderName not in self.selected_dirs:
+                self.selected_dirs.append(folderName)
+            # 更新label和log显示所有已选目录
+            dirs_str = '\n'.join(self.selected_dirs)
+            self.selected_dir_label.setText("已选目录数: {}".format(len(self.selected_dirs)))
+            self.log_display.append(f"当前已选择的目录：\n{dirs_str}")
+        else:
+            if not self.selected_dirs:
+                self.selected_dir_label.setText("未选择目录")
+
+    def change_log_level(self, level):
+        self.logger.setLevel(level)
+        self.append_log(f"日志级别已切换为: {level}")
+        self.processor.change_log_level(level)
+
+    def generate_output(self):
+        if not self.selected_dirs:
+            QMessageBox.warning(self, "提示", "请先选择目录！")
+            self.logger.warning("请先选择目录")
+            return
+        self.append_log("开始处理...")
+        try:
+            self.status_label.setText("处理中...")
+            self.generate_btn.setEnabled(False)
+            # 拷贝队列，避免原始列表被破坏
+            self._pending_dirs = list(self.selected_dirs)
+            self._all_results = {}
+            self._process_next_dir()
+        except Exception as e:
+            self.append_log(f"处理异常: {e}")
+            self.logger.error(f"处理异常: {e}")
+            # QMessageBox.critical(self, "错误", str(e))
+            self.status_label.setText("异常")
+
+    def _process_next_dir(self):
+        if not self._pending_dirs:
+            # 全部处理完成
+            self.generate_btn.setEnabled(True)
+            self.status_label.setText("处理完成")
+            self.logger.info("所有目录处理完成")
+            # 可在此处汇总所有结果 self._all_results
+            return
+        item = self._pending_dirs.pop(0)
+        if not os.path.exists(item):
+            self.logger.error(f"选择的目录不存在: {item}")
+            QMessageBox.critical(self, "错误", f"选择的目录不存在: {item}")
+            self.generate_btn.setEnabled(True)
+            self.status_label.setText("就绪")
+            return
+        # 启动后台线程
+        self.process_thread = ProcessThread(self.processor, item)
+        self.process_thread.finished.connect(self._on_single_process_finished)
+        self.process_thread.error.connect(self._on_single_process_error)
+        self.process_thread.log_signal.connect(self.append_log)
+        self.process_thread.start()
+
+    def _on_single_process_finished(self, results):
+        # 合并结果
+        if isinstance(results, dict):
+            self._all_results.update(results)
+            for dir_path, output_files in results.items():
+                self.logger.info(f"目录 {dir_path} 处理完成，生成 {len(output_files)} 个文件")
+        self._process_next_dir()
+
+    def _on_single_process_error(self, error_msg):
+        self.logger.error(f"处理过程中出错: {error_msg}")
+        self.log_display.append(f"[ERROR] 处理过程中出错: {error_msg}")
+        scrollbar = self.log_display.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+        self.generate_btn.setEnabled(True)
+        self.status_label.setText("处理失败")
+
+    def append_log(self, msg):
+        self.log_display.append(msg)
+        scrollbar = self.log_display.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = DemoMainWindow()
+    window.show()
+    sys.exit(app.exec_())

@@ -5,22 +5,24 @@ import yaml
 from typing import List, Dict
 from extractors.base_extrator import BaseExtractor
 from content_models import Slide, calculate_iou
-# from config.filelds_config import FIELDS_CONFIG
-from config.fields_loader import FIELDS_CONFIG
 from utils.text_utils import split_after_colon  # 确保已导入
 from utils.logger import LoggerFactory
+from config.loader import ConfigLoader
 import re
 import math
 
 class ExtractorA(BaseExtractor):
     """需求A提取器（支持多类型 shape 提取）"""
-    def __init__(self, slides: List[Slide]):
+    def __init__(self, slides: List[Slide], config_loader: ConfigLoader = None):
         self.logger = LoggerFactory.create_logger("Extractor_发包规范")
         self.logger.info("初始化提取器")
         super().__init__(slides)
-        self.config = FIELDS_CONFIG.get("发包规范V1", {})
+        # 优先使用传入的config_loader，否则尝试从fields_loader获取
+        if config_loader:
+            self.config = config_loader.config.get("FIELDS_CONFIG", {}).get("发包规范V1", {})
+
         if not self.config:
-            self.logger.warning("未找到发包规范V1的配置，请检查config/filelds_config.yaml文件")
+            self.logger.warning("未找到发包规范V1的配置")
 
 
     def _calc_utilization_rate(self, failure_rate: str) -> str:
