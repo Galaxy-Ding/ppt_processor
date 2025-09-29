@@ -1,8 +1,8 @@
 # filepath: d:\pythonf\ppt_processor\.gitignore
 .temp/
-__pycache__/
+*/__pycache__/
 *.pyc
 .idea/
 .temp/logs/
 *.log
-.gitignore
+*/.gitignore
