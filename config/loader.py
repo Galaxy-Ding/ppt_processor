@@ -1,7 +1,7 @@
 import os
 import yaml
 from typing import Dict, Any
-from utils.logger import LoggerFactory
+from utils.logger import LoggerFactory, LOG_LEVELS
 
 class ConfigLoader:
     """增强版配置加载器，支持动态配置更新"""
@@ -41,6 +41,11 @@ class ConfigLoader:
         docx_path = templates.get('docx', {}).get('path', 'templates')
         filename = templates.get('docx', {}).get('filename', '')
         return os.path.join(docx_path, filename)
+    
+    def get_all_projects_info(self) -> dict:
+        """获取方案总表的字典信息"""
+        templates = self.config.get('templates', {})
+        return templates.get('excel', {})
     
     def get_log_config(self) -> Dict[str, Any]:
         """获取日志配置"""

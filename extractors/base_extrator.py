@@ -11,7 +11,7 @@ from content_models import Slide  # 绝对导入
 
 class BaseExtractor(ABC):
     """抽象提取器基类"""
-    def __init__(self, slides: List[Slide]):
+    def __init__(self, slides: List[Slide] = None):
         self.slides = slides  # 输入的结构化幻灯片数据
 
     @abstractmethod

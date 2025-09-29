@@ -6,7 +6,7 @@ from typing import Optional, List
 from extractors.extrator_发包规范 import ExtractorA    
 # 4. 导出图片并生成文档
 from exporters.exporter_发包规范 import ExporterA
-from utils.logger import LoggerFactory
+from utils.logger import LoggerFactory, LOG_LEVELS
 
 logger = LoggerFactory.create_logger("ppt_reader")
 

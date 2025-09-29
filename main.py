@@ -1,7 +1,6 @@
 import sys
 from PyQt5.QtWidgets import QApplication
-from ui.发包规范_window_ui import PPTProcessorGUI
-from ui.demo_ui import DemoMainWindow
+from ui.发包规范_window_ui import DemoMainWindow
 
 def main():
     """主函数"""

@@ -1,103 +1,73 @@
 import logging
 from logging.handlers import TimedRotatingFileHandler
-import os
-from typing import Optional, Dict, Any
 from datetime import datetime
+import os
 
+LOG_LEVELS = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40}
+LEVEL_MAP = {
+        "DEBUG": logging.DEBUG,
+        "INFO": logging.INFO,
+        "WARNING": logging.WARNING,
+        "ERROR": logging.ERROR
+    }
 class LoggerFactory:
     """增强版日志工厂，支持GUI显示和文件记录"""
-    
+
     _loggers = {}
-    
+
     @classmethod
     def create_logger(
-        cls, 
-        name: str,
+        cls,
+        name: str = "default",
         log_level: str = "INFO",
-        log_file: Optional[str] = None,
+        log_file: str = None,
         retention_days: int = 30,
-        gui_display: Optional[object] = None
+        gui_display: object = None
     ) -> logging.Logger:
-        """创建或获取日志记录器
-        
-        Args:
-            name: 日志记录器名称
-            log_level: 日志级别 (DEBUG/INFO/WARNING/ERROR)
-            log_file: 日志文件路径
-            retention_days: 日志保留天数
-            gui_display: GUI显示对象，需有log_message方法
-        """
-        if name in cls._loggers:
-            return cls._loggers[name]
-            
-        logger = logging.getLogger(name)
-        logger.setLevel(log_level)
-        
-        # 清除现有处理器
-        for handler in logger.handlers[:]:
-            logger.removeHandler(handler)
-        
-        # 控制台输出
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(log_level)
-        console_formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        console_handler.setFormatter(console_formatter)
-        logger.addHandler(console_handler)
-        
-        # 文件输出
-        if log_file:
-            os.makedirs(os.path.dirname(log_file), exist_ok=True)
-            file_handler = TimedRotatingFileHandler(
-                log_file,
-                when='midnight',
-                backupCount=retention_days
-            )
-            file_handler.setLevel(log_level)
-            file_formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-            file_handler.setFormatter(file_formatter)
-            logger.addHandler(file_handler)
-        
-        # 添加GUI显示处理器
-        if gui_display:
-            class GuiLogHandler(logging.Handler):
-                def emit(self, record):
-                    msg = self.format(record)
-                    gui_display.log_message(msg, record.levelname)
-                    
-            gui_handler = GuiLogHandler()
-            gui_handler.setLevel(log_level)
-            logger.addHandler(gui_handler)
-        
-        cls._loggers[name] = logger
-        return logger
+        # 日志文件路径自动按日期命名
+        logs_dir = os.path.join(os.path.dirname(__file__), "..", "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        now = datetime.now()
+        date_prefix = now.strftime("%Y_%m_%d")
+        # 查找当天已存在的日志文件
+        existing_logs = [f for f in os.listdir(logs_dir) if f.startswith(date_prefix) and f.endswith(".log")]
+        log_file_path = None
+        max_size = 5 * 1024 * 1024  # 5MB
 
-    @classmethod
-    def update_log_level(cls, name: str, level: str):
-        """更新日志记录器级别"""
+        if existing_logs:
+            # 按修改时间排序，取最新的
+            existing_logs.sort(key=lambda f: os.path.getmtime(os.path.join(logs_dir, f)), reverse=True)
+            latest_log = os.path.join(logs_dir, existing_logs[0])
+            # 判断是否超过5MB
+            if os.path.getsize(latest_log) < max_size:
+                log_file_path = latest_log
+            else:
+                # 超过5MB，新建一个
+                file_name = now.strftime("%Y_%m_%d_%H_%M_%S.log")
+                log_file_path = os.path.join(logs_dir, file_name)
+        else:
+            # 当天没有日志，新建
+            file_name = now.strftime("%Y_%m_%d_%H_%M_%S.log")
+            log_file_path = os.path.join(logs_dir, file_name)
+
+        log_file = log_file or log_file_path
+
         if name in cls._loggers:
             logger = cls._loggers[name]
-            logger.setLevel(level)
-            for handler in logger.handlers:
-                handler.setLevel(level)
-
-class ProgressLogger:
-    """带进度记录的日志记录器"""
-    
-    def __init__(self, logger: logging.Logger):
-        self.logger = logger
-        self.progress = 0
-        self.max_progress = 100
-        
-    def set_progress(self, value: int, max_value: int = None):
-        """设置当前进度"""
-        self.progress = value
-        if max_value is not None:
-            self.max_progress = max_value
-        self.logger.info(f"进度: {value}/{self.max_progress}")
-        
-    def increment(self, step: int = 1):
-        """增加进度"""
-        self.progress += step
-        self.logger.info(f"进度: {self.progress}/{self.max_progress}")
+        else:
+            logger = logging.getLogger(name)
+            logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
+            formatter = logging.Formatter(
+                "%(asctime)s %(levelname)s %(name)s %(message)s"
+            )
+            file_handler = TimedRotatingFileHandler(
+                log_file, when="midnight", backupCount=retention_days, encoding="utf-8"
+            )
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+            # 可选：控制台输出
+            stream_handler = logging.StreamHandler()
+            stream_handler.setFormatter(formatter)
+            logger.addHandler(stream_handler)
+            cls._loggers[name] = logger
+        return logger

@@ -5,12 +5,13 @@ from pptx import Presentation
 from content_models import Slide
 from typing import List, Dict, Optional
 from config.loader import ConfigLoader
-from utils.logger import LoggerFactory
+from utils.logger import LoggerFactory, LOG_LEVELS
+from utils.text_utils import traditional_to_simplified
 from extractors.extrator_发包规范 import ExtractorA
 from exporters.exporter_发包规范 import ExporterA
 import traceback
 
-LOG_LEVELS = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40}
+
 
 class PackingFileProcessor:
     def set_log_callback(self, callback):
@@ -82,10 +83,20 @@ class PackingFileProcessor:
         return results
     
 
-    def process_generate_reports(self, selected_dir: str):
+    def process_generate_reports(self, selected_dir: str, data_list=None, manual_proj_name_value=None,
+                                 manual_proj_type_value=None):
         """
-        处理多个PPT文件，生成对应的发包规范文档
-        :param pptx_paths: 包含最大版本v3 PPT文件的路径列表
+        UI - 调用接口处理多个PPT文件，生成对应的发包规范文档。
+
+        Args:
+        selected_dir (str): 选定的目录，包含多个PPT文件。
+        data_list (list[dict], optional): 从Excel读取的结构化数据，默认为None。
+        manual_proj_name_value (str, optional): 手动输入的工程名字，默认为None。
+        manual_proj_type_value (str, optional): 手动输入的工程类型，默认为None。
+
+        Returns:
+        dict: 包含每个PPT文件的处理结果，键为PPT文件路径，值为生成的发包规范文档路径。
+
         """
         result_dirs = {}
         pptx_paths = self.get_v3_pptx_directories(selected_dir)
@@ -94,19 +105,28 @@ class PackingFileProcessor:
             try:
                 dir_path = os.path.dirname(pptx_path)
                 result_dir = self._create_result_dir(dir_path)
-                output_path = self._process_single_ppt(pptx_path, result_dir)
+                output_path = self._process_single_ppt(
+                    pptx_path, result_dir,
+                    data_list=data_list,
+                    manual_proj_name_value=manual_proj_name_value,
+                    manual_proj_type_value=manual_proj_type_value
+                )
             except Exception as e:
                 self._log(f"处理文件 {pptx_path} 失败: {str(e)}\n{traceback.format_exc()}", level="ERROR")
             result_dirs[pptx_path] = output_path
         return result_dirs
-    
-    def process_ppt_to_docx(self, pptx_path: str, docx_path: str, output_path: str, version: str = "v1"):
+
+    def process_ppt_to_docx(self, pptx_path: str, docx_path: str, output_path: str, version: str = "v1",
+                           data_list=None, manual_proj_name_value=None, manual_proj_type_value=None):
         """
         应用层统一入口：处理PPT，提取信息并生成文档
         :param pptx_path: PPTX文件路径
         :param docx_path: DOCX模板路径
         :param output_path: 输出DOCX路径
         :param version: 版本号
+        :param data_list: Excel结构化数据
+        :param manual_proj_name_value: 手动工程名字
+        :param manual_proj_type_value: 手动工程类型
         """
         # 读取PPT并结构化
         slides = self._read_pptx(pptx_path, version)
@@ -116,17 +136,59 @@ class PackingFileProcessor:
         result = extractor.extract()
         self.logger.debug("\n发包规范字段提取结果:")
         self.logger.debug(str(result))
-        # 导出图片并生成文档
+
+        # Excel数据匹配逻辑
+        project_code = result.get("ProjectCode")
+        matched_scheme_name = None
+        if data_list and project_code:
+            for item in data_list:
+                if str(item.get("ProjectCode", "")).strip() == str(project_code).strip():
+                    matched_scheme_name = item.get("name")
+                    matched_scheme_type = item.get("Action")
+                    break
+        # 匹配成功
+        if matched_scheme_name:
+            self.logger.debug(f"{project_code} 匹配到 方案總表的方案代碼\n")
+            result["name"] = matched_scheme_name
+            result["Action"] = matched_scheme_type
+            self.last_matched_name = matched_scheme_name
+            self.last_matched_type = matched_scheme_type
+        else:
+            # 未匹配到
+            self.logger.debug(f"{project_code} 采用 手動的名稱和Action\n")
+            result["name"], result["Action"] = "", ""
+            self.last_matched_name = "未匹配到"
+            self.last_matched_type = "未匹配到"
+            # 手动输入覆盖
+            if manual_proj_name_value:
+                result["name"] = manual_proj_name_value
+            if manual_proj_type_value:
+                result["Action"] = manual_proj_type_value
+
+
+        if traditional_to_simplified(result.get("Action")) in ["新制","研发","大改造", "大改"]:
+            result["InstalledDate"] = "21"
+        elif traditional_to_simplified(result.get("Action")) in ["再制", "中改造", "中改"]:
+            result["InstalledDate"] = "14"
+        elif traditional_to_simplified(result.get("Action")) in ["小改造","小改"]:
+            result["InstalledDate"] = "7"
+
+        if traditional_to_simplified(result.get("Action")) in ["新制","研发","大改造", "大改"]:
+            result["LQStartDate"] = "21"
+        elif traditional_to_simplified(result.get("Action")) in ["再制", "中改造", "中改"]:
+            result["LQStartDate"] = "14"
+        elif traditional_to_simplified(result.get("Action")) in ["小改造","小改"]:
+            result["LQStartDate"] = "7"
+        # OSSDate 固定为0
+        result["OSSDate"] = "0"
+
         exporter = ExporterA(pptx_path, docx_path, output_path)
-        # 需要从excel读取的数据，暂时无特定的表格
-        result["name"] = "avbaaa"
-        result["Action"] = "大改造"
         success = exporter.process(result)
         if success:
             self._log(f"\n文档已成功生成: {output_path}", level="INFO")
         else:
             self._log("\n文档生成失败", level="INFO")
-    
+
     def _create_result_dir(self, base_dir: str) -> str:
         """创建结果目录"""
         result_base = "result"
@@ -189,7 +251,7 @@ class PackingFileProcessor:
             self._log(f"读取PPT文件时出错: {str(e)}\n{traceback.format_exc()}", level="ERROR")
             raise
     
-    def _process_single_ppt(self, ppt_path: str, output_dir: str) -> str:
+    def _process_single_ppt(self, ppt_path: str, output_dir: str, data_list=None, manual_proj_name_value=None, manual_proj_type_value=None) -> str:
         """处理单个PPT文件"""
         self._log(f"开始处理文件: {ppt_path}", level="INFO")
         
@@ -205,7 +267,12 @@ class PackingFileProcessor:
         # 生成输出文件名
         output_filename = f"{prefix}_v1_发包规范.docx"
         output_path = os.path.join(output_dir, output_filename)
-        self.process_ppt_to_docx(ppt_path, self.get_template_path(), output_path, version="v1")
+        self.process_ppt_to_docx(
+            ppt_path, self.get_template_path(), output_path, version="v1",
+            data_list=data_list,
+            manual_proj_name_value=manual_proj_name_value,
+            manual_proj_type_value=manual_proj_type_value
+        )
        
         self._log(f"处理完成，输出到: {output_path}", level="INFO")
         return output_path

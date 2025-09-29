@@ -1,5 +1,10 @@
 import re
 from typing import Optional
+import zhconv
+
+def traditional_to_simplified(traditional_text):
+    simplified_text = zhconv.convert(traditional_text, 'zh-hans')
+    return simplified_text
 
 def split_after_colon(
     input_str: str,

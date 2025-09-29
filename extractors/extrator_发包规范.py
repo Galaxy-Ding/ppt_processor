@@ -2,14 +2,262 @@
 # 实现需求A：提取指定页面的标题等字段并导出为 发包规范
 import os
 import yaml
+import re
+import math
+from os import path
 from typing import List, Dict
 from extractors.base_extrator import BaseExtractor
 from content_models import Slide, calculate_iou
 from utils.text_utils import split_after_colon  # 确保已导入
-from utils.logger import LoggerFactory
+from utils.logger import LoggerFactory, LOG_LEVELS
 from config.loader import ConfigLoader
-import re
-import math
+from pathlib import Path
+from openpyxl import load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
+from openpyxl.worksheet.worksheet import Worksheet  # 新增：导入 Worksheet 类
+from typing import List, Dict, Optional, Union
+from utils.exceptions import *
+# 获取当前文件的绝对路径的根目录
+current_file_path = Path(__file__).resolve()
+main_dir = current_file_path.parent.parent  # 项目根目录（ppt_processor/）
+
+
+class ExtractorExcel(BaseExtractor):
+    """
+    Excel 文件读取器（面向对象风格）
+    支持指定标题行、多工作表查询、灵活匹配列
+
+    属性:
+        file_path (str): Excel 文件路径
+        sheet_name (Optional[str]): 当前工作表名（默认第一个）
+        header_row_num (int): 标题行行号（如第4行填4）
+        wb (Optional[Workbook]): openpyxl 工作簿对象
+        ws (Optional[Worksheet]): 当前工作表对象
+        header_row (List[Optional[str]]): 标题行数据（列名列表）
+        match_col_idx (Optional[int]): 匹配列的列索引（从0开始）
+    """
+
+    def __init__(
+            self,
+            config: ConfigLoader
+    ):
+        """
+        初始化 Excel 读取器
+
+        参数:
+            config: 配置加载器，包含文件路径、工作表名、标题行等配置
+        """
+        super().__init__()
+        # 优化：只加载一次正则规则配置
+        self.fields_config = config.config.get("FIELDS_CONFIG", {}).get("发包规范V2_EXCEL", {}).get("header", {})
+        self.config = config.get_all_projects_info()
+        self.file_path = os.path.join(main_dir, self.config.get('path', 'examples'), self.config.get('filename', '方案总表.xlsx'))
+        self.sheet_name = self.config.get('sheet_name', '方案总表')
+        self.header_row_num = self.config.get('header_row_num', 4)
+
+        self.logger = LoggerFactory.create_logger("ExtractorExcel")
+
+        # 初始化工作簿和工作表（延迟加载，避免重复打开）
+        self.wb: Optional[load_workbook] = None
+        self.ws: Optional[Worksheet] = None
+
+        # 初始化标题相关属性
+        self.header_row: List[Optional[str]] = []
+        self.match_col_idx: Optional[int] = None
+
+    def _load_workbook(self) -> None:
+        """私有方法：加载工作簿（仅在首次使用时打开）"""
+        if self.wb is None:
+            try:
+                if not path.exists(self.file_path):
+                    raise FileNotFoundError(file_path=self.file_path)  # 自动触发 WARNING 级别日志
+                # 以只读模式加载（适合大文件），禁用数据只读（确保能读取所有行）
+                self.wb = load_workbook(
+                    filename=self.file_path,
+                    read_only=True,
+                    data_only=True,
+                    keep_links=False  # 避免外部链接干扰
+                )
+                self.logger.debug(f"成功读取 Excel 文件：{self.file_path}")  # 开发模式下控制台+文件输出，生产模式仅文件（若级别允许）
+            except OfficeBaseException as e:
+                # 记录带错误代码的日志（自动包含堆栈信息）
+                self.logger.error(e)
+            except InvalidFileException as e:
+                self.logger.error(f"文件格式错误：{self.file_path} 不是有效的 .xlsx 文件")
+                raise OfficeBaseException(
+                    error_code=ErrorCode.FILE_INVALID_ERROR,
+                    message=f"文件格式错误：{str(e)}",
+                    level=logging.WARNING
+                )
+                raise ValueError(f"文件格式错误：{self.file_path} 不是有效的 .xlsx 文件")
+            except Exception as e:
+                # 通用异常处理（非自定义异常）
+                self.logger.error(f"未预期的异常：{str(e)}", exc_info=True)
+                raise OfficeBaseException(
+                    error_code=ErrorCode.UNKNOWN_ERROR,
+                    message=f"系统内部错误：{str(e)}",
+                    level=logging.CRITICAL
+                )
+
+    def _load_worksheet(self) -> None:
+        """私有方法：加载工作表（仅在首次使用时打开）"""
+        if self.ws is None:
+            self._load_workbook()  # 确保工作簿已加载
+
+            # 检查工作表是否存在
+            if self.sheet_name and self.sheet_name not in self.wb.sheetnames:
+                raise ValueError(
+                    f"工作表 '{self.sheet_name}' 不存在，可用工作表：{self.wb.sheetnames}"
+                )
+
+            # 选择工作表（优先使用指定的，否则用第一个）
+            self.ws = self.wb[self.sheet_name] if self.sheet_name else self.wb.worksheets[0]
+
+    def _read_header(self) -> None:
+        """私有方法：读取标题行并用正则规则替换为标准key"""
+        if not isinstance(self.ws, Worksheet):
+            self._load_worksheet()  # 确保工作表已加载
+
+        max_row = self.ws.max_row
+        if self.header_row_num > max_row or self.header_row_num < 1:
+            raise ValueError(
+                f"标题行号 {self.header_row_num} 无效，Excel 最大行数：{max_row}"
+            )
+
+        # 读取标题行（仅读取指定行）
+        header_cells = next(
+            self.ws.iter_rows(
+                min_row=self.header_row_num,
+                max_row=self.header_row_num,
+                values_only=True
+            ),
+            []
+        )
+        
+        # 反转为 {标准key: 正则}，方便遍历
+        key_regex_map = {k: re.compile(v) for k, v in self.fields_config.items()}
+
+        # 用正则匹配并替换标题
+        new_header_row = []
+        for cell_value in header_cells:
+            replaced = False
+            if cell_value is not None:
+                for std_key, regex in key_regex_map.items():
+                    if regex.search(str(cell_value)):
+                        new_header_row.append(std_key)
+                        replaced = True
+                        break
+            if not replaced:
+                new_header_row.append(cell_value)
+
+        # new_header_row 排除非空的項后面的 是否存在Nonetype, 如果有則刪除
+        while new_header_row and new_header_row[-1] is None:
+            new_header_row.pop()
+        # new_header_row 檢測中間是否存在Nonetype, 如果有則刪除
+        new_header_row = [col if col is not None else f"列{idx + 1}" for idx, col in enumerate(new_header_row)]
+        # new_header_row 每個項是否重複 有則拋出警告
+        if len(new_header_row) != len(set(new_header_row)):
+            self.logger.warning("标题行存在重复项，请检查 Excel 文件")
+
+        self.header_row = new_header_row
+
+    def set_match_column(self, match_column: str) -> None:
+        """
+        设置匹配列（如 '立項代码'），并自动计算列索引
+
+        参数:
+            match_column: 匹配依据的列名（需与标题行一致）
+        """
+        self._read_header()  # 确保标题行已读取
+
+        if match_column not in self.header_row:
+            raise ValueError(
+                f"匹配列 '{match_column}' 不存在，标题行列名：{self.header_row}"
+            )
+
+        # 计算列索引（从0开始）
+        self.match_col_idx = self.header_row.index(match_column)
+
+    def query_by_column(self, target_value: Union[str, int, float]) -> List[Dict]:
+        """
+        根据指定列匹配目标值，返回匹配的行数据（字典列表）
+
+        参数:
+            target_value: 需要匹配的目标值（如立项代码）
+
+        返回:
+            匹配的行数据（字典列表，键为列名，值为对应单元格内容）
+        """
+        # 延迟加载资源和标题
+        self._load_worksheet()
+        if not self.header_row:
+            self._read_header()
+        if self.match_col_idx is None:
+            raise ValueError("请先通过 set_match_column 方法设置匹配列")
+
+        # 数据行从标题行的下一行开始
+        start_row = self.header_row_num + 1
+        matched_rows: List[Dict] = []
+
+        # 遍历数据行
+        for row in self.ws.iter_rows(min_row=start_row, values_only=True):
+            # 跳过空行（整行都是 None）
+            if all(cell is None for cell in row):
+                continue
+
+            # 检查当前行是否有足够的列（避免索引越界）
+            if self.match_col_idx >= len(row):
+                continue  # 当前行无对应列数据，跳过
+
+            # 匹配目标值（兼容数值和字符串类型）
+            current_value = row[self.match_col_idx]
+            if str(current_value) == str(target_value):
+                # 构造行字典（缺失列补 None）
+                row_dict = {
+                    self.header_row[i]: row[i] if i < len(row) else None
+                    for i in range(len(self.header_row))
+                }
+                matched_rows.append(row_dict)
+
+        return matched_rows
+
+    def close(self) -> None:
+        """关闭工作簿（无需检查 is_closed）"""
+        if self.wb:
+            self.wb.close()  # openpyxl 的 Workbook.close() 无需检查状态
+            self.wb = None  # 释放引用
+            self.ws = None  # 释放工作表引用
+
+    def __enter__(self):
+        """上下文管理器：进入时自动加载资源"""
+        self._load_worksheet()
+        self._read_header()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """上下文管理器：退出时自动关闭工作簿"""
+        self.close()
+
+    def extract(self) -> List[Dict]:
+        """
+        结构化返回所有数据行，每行一个dict，header为key，数据为value
+        """
+        self._load_worksheet()
+        self._read_header()
+        start_row = self.header_row_num + 1
+        result = []
+        for row in self.ws.iter_rows(min_row=start_row, values_only=True):
+            # 跳过空行
+            if all(cell is None for cell in row):
+                continue
+            # 构造行字典（缺失列补None）
+            row_dict = {
+                self.header_row[i]: row[i] if i < len(row) else None
+                for i in range(len(self.header_row))
+            }
+            result.append(row_dict)
+        return result
+
 
 class ExtractorA(BaseExtractor):
     """需求A提取器（支持多类型 shape 提取）"""
@@ -19,10 +267,12 @@ class ExtractorA(BaseExtractor):
         super().__init__(slides)
         # 优先使用传入的config_loader，否则尝试从fields_loader获取
         if config_loader:
-            self.config = config_loader.config.get("FIELDS_CONFIG", {}).get("发包规范V1", {})
+            self.config = config_loader.config.get("FIELDS_CONFIG", {}).get("发包规范V1_PPT", {})
+        else:
+            self.config = {}
 
         if not self.config:
-            self.logger.warning("未找到发包规范V1的配置")
+            self.logger.warning("未找到发包规范V1_PPT的配置")
 
 
     def _calc_utilization_rate(self, failure_rate: str) -> str:
@@ -41,23 +291,28 @@ class ExtractorA(BaseExtractor):
             return ""
 
     def extract(self) -> Dict:
-        self.logger.info("开始提取内容")
+        self.logger.info("excel 开始提取内容")
         try:
             flat_result = {}
 
             # 处理 master 字段（用 master_shapes 匹配）
             master_cfg = self.config.get("master", {})
             if master_cfg:
-                for field, pos_dict in master_cfg.items():
-                    for key, position in pos_dict.items():
-                        # 遍历所有 slide，查找 master_shapes
-                        for slide in self.slides:
-                            for shape in slide.get("master_shapes", []):
-                                iou = calculate_iou(shape["box"], position)
-                                if iou > 0.3:
-                                    # 只取第一个匹配
-                                    flat_result[key] = shape.get("text", "")
-                                    break
+                pos_dict = master_cfg.get("iou", {})
+                iou_threshold = master_cfg.get("iou_threshold", 0.1)
+                for key, position in pos_dict.items():
+                    if len(position) < 4:
+                        self.logger.error(f"position of ProjectCode is empty, please check the fields_config.yaml")
+                        raise ValueError("position of ProjectCode is empty, please check the fields_config.yaml")
+                    # 遍历所有 slide，查找 master_shapes
+                    for slide in self.slides:
+                        for shape in slide.get("master_shapes", []):
+                            iou = calculate_iou(shape["box"], position)
+                            self.logger.debug(f"匹配 master 字段 {key}，计算 IOU: {iou:.2f}")
+                            if iou > iou_threshold:
+                                # 只取第一个匹配
+                                flat_result[key] = shape.get("text", "")
+                                break
 
             # 按 page 定位
             for page_num, page_cfg in self.config.get("page", {}).items():
@@ -267,8 +522,44 @@ class ExtractorA(BaseExtractor):
             if shape["type"] == "Table":
                 return shape["last_row"].get(field_name, "")
         return None
+    
 
-if __name__ == "__main__":
+def example_usage_excel():
+    """示例用法"""
+    # 配置参数（根据实际情况修改）
+    match_column = "立項代码"  # 匹配列名
+    target_value = "adazffa5"  # 要匹配的目标值
+    config_loader = ConfigLoader(config_dir=r"..\config")
+
+    try:
+        # 方式1：手动创建对象并调用方法
+        reader = ExtractorExcel(config=config_loader)
+        result = reader.extract()
+        # 若是已經有了result reader 可以退出了，就不會占用excel資源
+        reader.close()
+        print(f"总共读取 {len(result)} 行数据")
+        # # 方式2：使用上下文管理器（自动管理资源）
+        # with ExtractorExcel(
+        #         config=config_loader,
+        # ) as reader:
+        #     reader.set_match_column(match_column)
+        #     result = reader.query_by_column(target_value)
+        #     print(f"上下文管理器查询结果：{len(result)} 条")
+
+        # 打印结果（示例）
+        if result:
+            print("\n匹配结果：")
+            print(" | ".join(result[0].keys()))  # 打印表头
+            for row in result:
+                print(" | ".join(str(v) if v is not None else "空" for v in row.values()))
+
+    except ValueError as e:
+        print(f"错误：{str(e)}")
+    except Exception as e:
+        print(f"未知错误：{str(e)}")
+
+def example_usage_extractor_a():
+    """示例用法"""
     from config.loader import ConfigLoader
     from content_models import Slide
     from pptx import Presentation
@@ -276,6 +567,8 @@ if __name__ == "__main__":
     # 测试提取器
     pptx_path = r"..\examples/templates/26xdemo2.pptx"
     config_loader = ConfigLoader(config_dir=r"..\config")
+
+
     
     # 读取PPT并结构化
     prs = Presentation(pptx_path)
@@ -287,7 +580,13 @@ if __name__ == "__main__":
     slides_dicts = [slide.to_dict() for slide in slides]
     
     # 测试提取
-    extractor = ExtractorA(slides_dicts)
+    extractor = ExtractorA(slides_dicts, config_loader)
     result = extractor.extract()
     print("字段提取完成")
     print(f"提取结果: {result}")
+
+
+if __name__ == "__main__":
+    # example_usage_excel()
+    example_usage_extractor_a()
+    pass

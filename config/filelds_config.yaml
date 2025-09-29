@@ -1,8 +1,19 @@
 FIELDS_CONFIG:
-  发包规范V1:
+  发包规范V1_EXCEL:
+    header:
+        "ProjectCode": "(立\\s*[项項]\\s*[編编代]\\s*[码碼])|(方\\s*案\\s*[編编代]\\s*[码碼])"
+        "name": "(方\\s*案\\s*名\\s*[稱称])|([项項]\\s*目\\s*名\\s*[稱称])"
+        "Action": "([项項]\\s*目\\s*[類类]\\s*型)|(方\\s*案\\s*[類类]\\s*型)"
+  发包规范V2_EXCEL:
+    header:
+      "ProjectCode": "(?<!\\S)(?:立\\s*[项項]\\s*[編编代]\\s*[码碼])"
+      "name": "(?<!\\S)(?:方\\s*案\\s*名\\s*[稱称]|[项項]\\s*目\\s*名\\s*[稱称])(?!\\S)"
+      "Action": "(?<!\\S)(?<!\\S)方\\s*案\\s*[類类]\\s*型(?!\\S)"
+  发包规范V1_PPT:
     master:
       iou:
-        ProjectCode: [22.17, 1.33, 3.54, 2.11]
+        ProjectCode: [22, 1.4, 2, 3.35]
+      iou_threshold: 0.1
     page:
       "1":
         iou:

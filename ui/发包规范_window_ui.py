@@ -1,225 +1,81 @@
-from PyQt5.QtCore import QThread, pyqtSignal
 import sys
 import os
-import re
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                            QHBoxLayout, QPushButton, QLabel, QTextEdit, 
-                            QFileDialog, QComboBox, QMessageBox, QLineEdit,
-                             QSizePolicy)
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QFileDialog,
+                             QPushButton, QLabel, QTextEdit, QCheckBox,
+                             QComboBox, QMessageBox, QLineEdit)
+from PyQt5 import uic
+from PyQt5.QtGui import QFont
 from PyQt5.QtCore import Qt
-from utils.logger import LoggerFactory
+from PyQt5.QtGui import QPainter, QColor
+from PyQt5.QtGui import QPainter, QColor
+from utils.logger import LoggerFactory, LOG_LEVELS, LEVEL_MAP
 from config.loader import ConfigLoader
+from PyQt5.QtCore import QThread, pyqtSignal
+from extractors.extrator_发包规范 import ExtractorExcel
 # 初始化处理器
 from core.packing_file_发包规范 import PackingFileProcessor
-from PyQt5.QtGui import QPainter, QColor
-
-
-
 
 # 后台处理线程
 class ProcessThread(QThread):
     finished = pyqtSignal(dict)
     error = pyqtSignal(str)
     log_signal = pyqtSignal(str)
-    def __init__(self, processor, selected_dir):
+    auto_info_signal = pyqtSignal(str, str)  # 新增，传递自动匹配的名称和类型
+    def __init__(self, processor, selected_dir, data_list=None, manual_proj_name_value=None, manual_proj_type_value=None):
         super().__init__()
         self.processor = processor
         self.selected_dir = selected_dir
+        self.data_list = data_list
+        self.manual_proj_name_value = manual_proj_name_value
+        self.manual_proj_type_value = manual_proj_type_value
     def emit_log(self, msg):
         self.log_signal.emit(msg)
     def run(self):
         try:
             self.processor.set_log_callback(self.emit_log)
-            results = self.processor.process_generate_reports(self.selected_dir)
+            results = self.processor.process_generate_reports(
+                self.selected_dir, self.data_list,
+                self.manual_proj_name_value, self.manual_proj_type_value
+            )
+            # 假设只处理一个PPT，取第一个结果
+            for pptx_path, output_path in results.items():
+                # 这里可以从processor里获取匹配结果
+                matched_name = self.processor.last_matched_name if hasattr(self.processor, "last_matched_name") else ""
+                matched_type = self.processor.last_matched_type if hasattr(self.processor, "last_matched_type") else ""
+                self.auto_info_signal.emit(matched_name, matched_type)
+                break
             self.finished.emit(results)
         except Exception as e:
             self.error.emit(str(e))
 
-from PyQt5.QtGui import QPainter, QColor
 
-class StatusCircle(QWidget):
-    """绿色/红色状态圆"""
-    def __init__(self, color="green", parent=None):
-        super().__init__(parent)
-        self._color = color
-        self.setFixedSize(24, 24)
-
-    def set_color(self, color):
-        self._color = color
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        if self._color == "green":
-            painter.setBrush(QColor(0, 200, 0))
-        else:
-            painter.setBrush(QColor(200, 0, 0))
-        painter.setPen(Qt.NoPen)
-        painter.drawEllipse(0, 0, 24, 24)
-
-class PPTProcessorGUI(QMainWindow):
+class DemoMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        # 加载UI
+        uic.loadUi("ui/发包规范_window.ui", self)
         self.setWindowTitle("发包规范一键生成工具")
-        self.setGeometry(100, 100, 800, 600)
-        
-        # 初始化配置
+
+        # 初始化配置和日志
         self.configs = ConfigLoader()
-        self.logger = self.setup_logger(self.configs.config["logs"])
+        self.logger = LoggerFactory.create_logger("DemoUI")
+        self.processor = None
         self.selected_dirs = []
 
-        # 创建UI
-        self.init_ui()
-
-        self.processor = PackingFileProcessor(
-            self.configs
-        )
-
-    def setup_logger(self, log_config: dict = {}):
-        """设置日志记录器"""
-        if log_config:
-            log_path = log_config.get('path', '../logs')
-            os.makedirs(log_path, exist_ok=True)
-
-            return LoggerFactory.create_logger(
-                "PPTProcessorGUI",
-                log_level=log_config.get('level', 'INFO'),
-                log_file=os.path.join(log_path, 'ppt_processor.log'),
-                retention_days=log_config.get('retention_days', 30)
-            )
-
-    def init_ui(self):
-        """根据新UI布局调整"""
-        main_widget = QWidget(self)
-        self.setCentralWidget(main_widget)
-        main_layout = QVBoxLayout(main_widget)
-        main_layout.setSpacing(15)
-        main_layout.setContentsMargins(15, 15, 15, 15)
-
-        # 顶部控制区域
-        top_control_widget = QWidget()
-        top_layout = QHBoxLayout(top_control_widget)
-        top_layout.setContentsMargins(0, 0, 0, 0)
-
-        # 选择目录按钮
-        self.select_dir_btn = QPushButton("选择目录")
-        self.select_dir_btn.setFixedSize(160, 80)
-        self.select_dir_btn.setObjectName("selectDirBtn")
-        self.select_dir_btn.setStyleSheet("font-size:22px; background:#4A90E2; color:white; border-radius:20px; padding:20px;")
-        self.select_dir_btn.clicked.connect(self.select_directories)
-
-        # 目录标签
-        self.selected_dir_label = QLabel("未选择")
-        self.selected_dir_label.setStyleSheet("font-size:18px; color:gray;")
-        self.selected_dir_label.setFixedHeight(30)
-
-        # 日志级别标签和下拉框
-        log_level_label = QLabel("日志级别：")
-        self.log_level_combo = QComboBox()
-        self.log_level_combo.addItems(["INFO", "DEBUG", "WARNING", "ERROR"])
-        self.log_level_combo.setCurrentText("INFO")
-        self.log_level_combo.setFixedSize(120, 30)
-        self.log_level_combo.currentTextChanged.connect(self.change_log_level)
-
-        # 一键生成按钮
-        self.generate_btn = QPushButton("一键生成")
-        self.generate_btn.setFixedSize(160, 80)
-        self.generate_btn.setObjectName("generateBtn")
-        self.generate_btn.setStyleSheet("font-size:22px; background:#4CAF50; color:white; border-radius:20px; padding:20px;")
-        self.generate_btn.clicked.connect(self.generate_output)
-
-        # 顶部布局
-        top_layout.addWidget(self.select_dir_btn)
-        top_layout.addWidget(self.selected_dir_label)
-        top_layout.addStretch()
-        top_layout.addWidget(log_level_label)
-        top_layout.addWidget(self.log_level_combo)
-        top_layout.addWidget(self.generate_btn)
-
-        # 工程信息区域（左右沾满）
-        info_layout = QHBoxLayout()
-        info_layout.setSpacing(30)
-        info_layout.setContentsMargins(0, 0, 0, 0)
-
-        # 左侧工程信息
-        left_info_widget = QWidget()
-        left_info_widget.setStyleSheet("QWidget { border:2px solid #aaa; border-radius:10px; }")
-        left_info_layout = QVBoxLayout(left_info_widget)
-        left_info_layout.setContentsMargins(15, 15, 15, 15)
-        self.lbl_proj_name = QLabel("工程名字：")
-        self.txt_proj_name = QLineEdit()
-        self.lbl_proj_type = QLabel("工程类型")
-        self.cmb_proj_type = QComboBox()
-        self.cmb_proj_type.addItems(["小改造", "大改造", "新建"])
-        left_info_layout.addWidget(self.lbl_proj_name)
-        left_info_layout.addWidget(self.txt_proj_name)
-        left_info_layout.addWidget(self.lbl_proj_type)
-        left_info_layout.addWidget(self.cmb_proj_type)
-        left_info_layout.addStretch()
-        # 让左侧沾满
-        left_info_widget.setMinimumWidth(0)
-        left_info_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-
-        # 右侧工程信息
-        right_info_widget = QWidget()
-        right_info_widget.setStyleSheet("QWidget { border:2px solid #aaa; border-radius:10px; }")
-        right_info_layout = QVBoxLayout(right_info_widget)
-        right_info_layout.setContentsMargins(15, 15, 15, 15)
-        self.lbl_proj_name_r = QLabel("工程名字：")
-        self.txt_proj_name_r = QLineEdit()
-        self.lbl_proj_type_r = QLabel("工程类型")
-        self.cmb_proj_type_r = QComboBox()
-        self.cmb_proj_type_r.addItems(["小改造", "大改造", "新建"])
-        right_info_layout.addWidget(self.lbl_proj_name_r)
-        right_info_layout.addWidget(self.txt_proj_name_r)
-        right_info_layout.addWidget(self.lbl_proj_type_r)
-        right_info_layout.addWidget(self.cmb_proj_type_r)
-        right_info_layout.addStretch()
-        # 让右侧沾满
-        right_info_widget.setMinimumWidth(0)
-        right_info_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-
-        # 状态圆，绝对定位到右侧框左上角
-        status_circle_container = QWidget(right_info_widget)
-        status_circle_container.setFixedSize(30, 30)
-        self.status_circle = StatusCircle("green", status_circle_container)
-        self.status_circle.move(3, 3)  # 微调到右侧框左上角
-
-        # 用布局包裹右侧框和圆
-        right_info_outer = QWidget()
-        right_info_outer_layout = QVBoxLayout(right_info_outer)
-        right_info_outer_layout.setContentsMargins(0, 0, 0, 0)
-        right_info_outer_layout.setSpacing(0)
-        right_info_outer_layout.addWidget(status_circle_container, alignment=Qt.AlignLeft | Qt.AlignTop)
-        right_info_outer_layout.addWidget(right_info_widget)
-
-        info_layout.addWidget(left_info_widget)
-        info_layout.addWidget(right_info_outer)
-
-        # 消息打印区域
-        msg_label = QLabel("消息打印：")
-        self.log_display = QTextEdit()
-        self.log_display.setReadOnly(True)
-
-        # 添加到主布局
-        main_layout.addWidget(top_control_widget)
-        main_layout.addLayout(info_layout)
-        main_layout.addWidget(msg_label)
-        main_layout.addWidget(self.log_display)
-
-        # 状态栏
-        status_layout = QHBoxLayout()
-        status_layout.addStretch(1)
-        self.status_label = QLabel("就绪")
-        self.status_label.setStyleSheet("font-size:9.5pt; color:#888; margin-top:2px;")
-        status_layout.addWidget(self.status_label)
-        main_layout.addLayout(status_layout)
-
+        # 绑定控件
+        self._bind_widgets()
+        self._connect_signals()
+        # 美化界面
         self.apply_style()
-
-    def set_status_circle(self, color: str):
-        """设置状态圆颜色，color='green'或'red'"""
-        self.status_circle.set_color(color)
+        self.processor = PackingFileProcessor(self.configs)
+        # 新增：初始化手动输入的值
+        self.manual_proj_name_value = ""
+        # 设置 combobox 默认值为第0个
+        self.manual_proj_type.setCurrentIndex(0)
+        self.manual_proj_type_value = self.manual_proj_type.currentText()
+        # 设置 read_project_status 为只读
+        self.read_project_status.setEnabled(False)
+        self.data_list = self._read_from_local_excel()
 
     def apply_style(self):
         self.setStyleSheet("""
@@ -272,9 +128,56 @@ class PPTProcessorGUI(QMainWindow):
                 color: #333333;
             }
         """)
-        from PyQt5.QtGui import QFont
         font = QFont("Microsoft YaHei", 9)
         QApplication.setFont(font)
+
+    def setup_logger(self, log_config: dict = {}):
+        """设置日志记录器"""
+        if log_config:
+            log_path = log_config.get('path', '../logs')
+            os.makedirs(log_path, exist_ok=True)
+
+            return LoggerFactory.create_logger(
+                "PPTProcessorGUI",
+                log_level=log_config.get('level', 'INFO'),
+                log_file=os.path.join(log_path, 'ppt_processor.log'),
+                retention_days=log_config.get('retention_days', 30)
+            )
+
+
+    def _bind_widgets(self):
+        # 这些名称需与demo.ui中的objectName一致
+        self.select_dir_btn = self.findChild(type(self.select_dir_btn), "select_dir_btn")
+        self.selected_dir_label = self.findChild(type(self.selected_dir_label), "selected_dir_label")
+        self.generate_btn = self.findChild(type(self.generate_btn), "generate_btn")
+        self.log_level_combo = self.findChild(QComboBox, "log_level_combo")
+        self.log_display = self.findChild(QTextEdit, "log_display")
+        self.status_label = self.findChild(type(self.status_label), "status_label")
+        self.manual_proj_name = self.findChild(QLineEdit, "manual_txt_proj_name")
+        self.manual_proj_type = self.findChild(QComboBox, "manual_proj_type_combo")
+        self.auto_proj_name = self.findChild(QLabel, "auto_proj_name_label")
+        self.auto_proj_type = self.findChild(QLabel, "auto_proj_type_label")
+        self.read_project_status = self.findChild(QCheckBox, "chBox_read_ProjectStatus") # 状态圆如用自定义控件可用
+
+    def _connect_signals(self):
+        self.select_dir_btn.clicked.connect(self.select_directories)
+        self.generate_btn.clicked.connect(self.generate_output)
+        self.log_level_combo.currentTextChanged.connect(self.change_log_level)
+        # 新增：手动输入信号与槽函数绑定
+        self.manual_proj_name.editingFinished.connect(self.on_manual_proj_name_changed)
+        self.manual_proj_type.currentTextChanged.connect(self.on_manual_proj_type_changed)
+
+    # 新增：手动输入槽函数
+    def on_manual_proj_name_changed(self):
+        value = self.manual_proj_name.text()
+        self.manual_proj_name_value = value
+        self.logger.debug(f"手动工程名字输入: {value}")
+        self.append_log(f"手动工程名字输入: {value}")
+
+    def on_manual_proj_type_changed(self, value):
+        self.manual_proj_type_value = value
+        self.logger.debug(f"手动工程类型选择: {value}")
+        self.append_log(f"手动工程类型选择: {value}")
 
     def select_directories(self):
         """选择多个目录，显示所有已选目录"""
@@ -300,25 +203,40 @@ class PPTProcessorGUI(QMainWindow):
             if not self.selected_dirs:
                 self.selected_dir_label.setText("未选择目录")
 
-
     def change_log_level(self, level):
-        """更改日志级别"""
-        self.logger.setLevel(level)
-        self.logger.info(f"日志级别已更改为: {level}")
+        new_level = LEVEL_MAP[level]
+        self.logger.setLevel(new_level)
+        for logger in LoggerFactory._loggers.values():
+            logger.setLevel(new_level)
+            logger.level = LOG_LEVELS[level]
+            for handler in logger.handlers:
+                handler.setLevel(new_level)
+        self.append_log(f"日志级别已切换为: {level}")
         self.processor.change_log_level(level)
 
+
     def generate_output(self):
-        """一键生成输出（顺序队列处理，防卡顿）"""
         if not self.selected_dirs:
+            QMessageBox.warning(self, "提示", "请先选择目录！")
             self.logger.warning("请先选择目录")
             return
-        self.logger.info("开始处理...")
-        self.status_label.setText("处理中...")
-        self.generate_btn.setEnabled(False)
-        # 拷贝队列，避免原始列表被破坏
-        self._pending_dirs = list(self.selected_dirs)
-        self._all_results = {}
-        self._process_next_dir()
+        self.append_log("开始处理...")
+        try:
+            self.status_label.setText("处理中...")
+            self.generate_btn.setEnabled(False)
+            # 拷贝队列，避免原始列表被破坏
+            self._pending_dirs = list(self.selected_dirs)
+            self._all_results = {}
+            self._process_next_dir()
+        except Exception as e:
+            self.append_log(f"处理异常: {e}")
+            self.logger.error(f"处理异常: {e}")
+            # QMessageBox.critical(self, "错误", str(e))
+            self.status_label.setText("异常")
+
+    def update_auto_info(self, name, action):
+        self.auto_proj_name.setText(name)
+        self.auto_proj_type.setText(action)
 
     def _process_next_dir(self):
         if not self._pending_dirs:
@@ -336,10 +254,12 @@ class PPTProcessorGUI(QMainWindow):
             self.status_label.setText("就绪")
             return
         # 启动后台线程
-        self.process_thread = ProcessThread(self.processor, item)
+        self.process_thread = ProcessThread(self.processor, item, self.data_list,
+                                            self.manual_proj_name_value, self.manual_proj_type_value)
         self.process_thread.finished.connect(self._on_single_process_finished)
         self.process_thread.error.connect(self._on_single_process_error)
         self.process_thread.log_signal.connect(self.append_log)
+        self.process_thread.auto_info_signal.connect(self.update_auto_info)  # 新增
         self.process_thread.start()
 
     def _on_single_process_finished(self, results):
@@ -363,9 +283,27 @@ class PPTProcessorGUI(QMainWindow):
         scrollbar = self.log_display.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
+    def _read_from_local_excel(self):
+        """
+        读取本地Excel，异常保护，日志根据等级显示和记录
+        """
+        try:
+            extractor = ExtractorExcel(self.configs)
+            data_list = extractor.extract()  # 返回 [dict1, dict2, ...]
+            self.logger.info(f"成功读取Excel数据，共{len(data_list)}行")
+            self.append_log(f"成功读取Excel数据，共{len(data_list)}行")
+            self.read_project_status.setChecked(True)  # 读取成功，设为True
+            return data_list
+        except Exception as e:
+            msg = f"读取Excel失败: {e}"
+            if self.logger:
+                self.logger.error(msg)
+            self.append_log(msg)
+            self.read_project_status.setChecked(False)  # 读取失败，设为False
+            return []
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = PPTProcessorGUI()
+    window = DemoMainWindow()
     window.show()
     sys.exit(app.exec_())

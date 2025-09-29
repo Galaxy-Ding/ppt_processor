@@ -4,7 +4,7 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE, MSO_AUTO_SHAPE_TYPE
 from pptx.dml.color import RGBColor
 from typing import List, Dict, Optional, Tuple
 from config.loader import ConfigLoader
-from utils.logger import LoggerFactory
+from utils.logger import LoggerFactory, LOG_LEVELS
 
 # ------------------------------ 静态工具方法 ------------------------------
 def calculate_iou(box1: Tuple[float, float, float, float],

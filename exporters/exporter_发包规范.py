@@ -7,7 +7,7 @@ import comtypes.client
 import time
 from PIL import Image
 from typing import Dict, Any, Tuple
-from utils.logger import LoggerFactory
+from utils.logger import LoggerFactory, LOG_LEVELS
 # 获取当前文件的绝对路径的根目录
 current_file_path = Path(__file__).resolve()
 main_dir = current_file_path.parent.parent  # 项目根目录（ppt_processor/）
@@ -181,7 +181,8 @@ class DocxProcessor:
     def _replace_keywords_in_paragraph(self, para, replacements: Dict[str, str]) -> None:
         for run in para.runs:
             for key, value in replacements.items():
-                if key in run.text:
+                # 只有value非空才替换
+                if key in run.text and value not in [None, ""]:
                     run.text = run.text.replace(key, str(value))
 
     def _replace_keywords_in_table(self, table, replacements: Dict[str, str]) -> None:
