@@ -150,7 +150,7 @@
           </widget>
          </item>
          <item>
-          <widget class="QComboBox" name="manual_proj_type_combo">
+          <widget class="QComboBox" name="manual_proj_action_combo">
            <item>
             <property name="text">
              <string>小改造</string>
@@ -223,7 +223,7 @@
             </widget>
            </item>
            <item>
-            <widget class="QLabel" name="auto_proj_type_label">
+            <widget class="QLabel" name="auto_proj_action_label">
              <property name="text">
               <string>未读取到数据</string>
              </property>

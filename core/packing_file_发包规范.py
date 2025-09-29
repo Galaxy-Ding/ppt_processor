@@ -84,7 +84,7 @@ class PackingFileProcessor:
     
 
     def process_generate_reports(self, selected_dir: str, data_list=None, manual_proj_name_value=None,
-                                 manual_proj_type_value=None):
+                                 manual_proj_action_value=None):
         """
         UI - 调用接口处理多个PPT文件，生成对应的发包规范文档。
 
@@ -92,7 +92,7 @@ class PackingFileProcessor:
         selected_dir (str): 选定的目录，包含多个PPT文件。
         data_list (list[dict], optional): 从Excel读取的结构化数据，默认为None。
         manual_proj_name_value (str, optional): 手动输入的工程名字，默认为None。
-        manual_proj_type_value (str, optional): 手动输入的工程类型，默认为None。
+        manual_proj_action_value (str, optional): 手动输入的工程类型，默认为None。
 
         Returns:
         dict: 包含每个PPT文件的处理结果，键为PPT文件路径，值为生成的发包规范文档路径。
@@ -109,7 +109,7 @@ class PackingFileProcessor:
                     pptx_path, result_dir,
                     data_list=data_list,
                     manual_proj_name_value=manual_proj_name_value,
-                    manual_proj_type_value=manual_proj_type_value
+                    manual_proj_action_value=manual_proj_action_value
                 )
             except Exception as e:
                 self._log(f"处理文件 {pptx_path} 失败: {str(e)}\n{traceback.format_exc()}", level="ERROR")
@@ -117,7 +117,7 @@ class PackingFileProcessor:
         return result_dirs
 
     def process_ppt_to_docx(self, pptx_path: str, docx_path: str, output_path: str, version: str = "v1",
-                           data_list=None, manual_proj_name_value=None, manual_proj_type_value=None):
+                           data_list=None, manual_proj_name_value=None, manual_proj_action_value=None):
         """
         应用层统一入口：处理PPT，提取信息并生成文档
         :param pptx_path: PPTX文件路径
@@ -126,7 +126,7 @@ class PackingFileProcessor:
         :param version: 版本号
         :param data_list: Excel结构化数据
         :param manual_proj_name_value: 手动工程名字
-        :param manual_proj_type_value: 手动工程类型
+        :param manual_proj_action_value: 手动工程类型
         """
         # 读取PPT并结构化
         slides = self._read_pptx(pptx_path, version)
@@ -140,45 +140,57 @@ class PackingFileProcessor:
         # Excel数据匹配逻辑
         project_code = result.get("ProjectCode")
         matched_scheme_name = None
+        matched_scheme_type = ""
+        matched_scheme_action = ""
         if data_list and project_code:
             for item in data_list:
                 if str(item.get("ProjectCode", "")).strip() == str(project_code).strip():
                     matched_scheme_name = item.get("name")
-                    matched_scheme_type = item.get("Action")
+                    matched_scheme_action = item.get("Action")
+                    matched_scheme_type = item.get("type")
                     break
+
         # 匹配成功
         if matched_scheme_name:
             self.logger.debug(f"{project_code} 匹配到 方案總表的方案代碼\n")
             result["name"] = matched_scheme_name
-            result["Action"] = matched_scheme_type
+            result["Action"] = matched_scheme_action
             self.last_matched_name = matched_scheme_name
-            self.last_matched_type = matched_scheme_type
+            self.last_matched_action = matched_scheme_action
         else:
             # 未匹配到
             self.logger.debug(f"{project_code} 采用 手動的名稱和Action\n")
             result["name"], result["Action"] = "", ""
             self.last_matched_name = "未匹配到"
-            self.last_matched_type = "未匹配到"
+            self.last_matched_action = "未匹配到"
             # 手动输入覆盖
             if manual_proj_name_value:
                 result["name"] = manual_proj_name_value
-            if manual_proj_type_value:
-                result["Action"] = manual_proj_type_value
+            if manual_proj_action_value:
+                result["Action"] = manual_proj_action_value
 
+        # 读取配置
+        config_dict = self.config.config.get("FIELDS_CONFIG", {})
+        install_days_config = config_dict.get("发包规范V1_InstalledDate", {})
+        lq_days_config = config_dict.get("发包规范V1_LQStartDate", {})
 
-        if traditional_to_simplified(result.get("Action")) in ["新制","研发","大改造", "大改"]:
-            result["InstalledDate"] = "21"
-        elif traditional_to_simplified(result.get("Action")) in ["再制", "中改造", "中改"]:
-            result["InstalledDate"] = "14"
-        elif traditional_to_simplified(result.get("Action")) in ["小改造","小改"]:
-            result["InstalledDate"] = "7"
+        action_value = traditional_to_simplified(result.get("Action", ""))
+        action_value = self.normalize_action(action_value)
+        scheme_type_value = traditional_to_simplified(matched_scheme_type or "")
 
-        if traditional_to_simplified(result.get("Action")) in ["新制","研发","大改造", "大改"]:
-            result["LQStartDate"] = "21"
-        elif traditional_to_simplified(result.get("Action")) in ["再制", "中改造", "中改"]:
-            result["LQStartDate"] = "14"
-        elif traditional_to_simplified(result.get("Action")) in ["小改造","小改"]:
-            result["LQStartDate"] = "7"
+        # InstalledDate
+        result["InstalledDate"] = str(install_days_config.get(action_value, ""))
+
+        # LQStartDate
+        lq_days = ""
+        if scheme_type_value and scheme_type_value in lq_days_config:
+            lq_type_dict = lq_days_config[scheme_type_value]
+            lq_days = lq_type_dict.get(action_value, "")
+        else:
+            # 若无类型，直接用Action对应的默认LQStartDate
+            lq_days = install_days_config.get(action_value, "")
+        result["LQStartDate"] = str(lq_days)
+
         # OSSDate 固定为0
         result["OSSDate"] = "0"
 
@@ -251,7 +263,7 @@ class PackingFileProcessor:
             self._log(f"读取PPT文件时出错: {str(e)}\n{traceback.format_exc()}", level="ERROR")
             raise
     
-    def _process_single_ppt(self, ppt_path: str, output_dir: str, data_list=None, manual_proj_name_value=None, manual_proj_type_value=None) -> str:
+    def _process_single_ppt(self, ppt_path: str, output_dir: str, data_list=None, manual_proj_name_value=None, manual_proj_action_value=None) -> str:
         """处理单个PPT文件"""
         self._log(f"开始处理文件: {ppt_path}", level="INFO")
         
@@ -271,7 +283,7 @@ class PackingFileProcessor:
             ppt_path, self.get_template_path(), output_path, version="v1",
             data_list=data_list,
             manual_proj_name_value=manual_proj_name_value,
-            manual_proj_type_value=manual_proj_type_value
+            manual_proj_action_value=manual_proj_action_value
         )
        
         self._log(f"处理完成，输出到: {output_path}", level="INFO")
@@ -280,3 +292,16 @@ class PackingFileProcessor:
     def get_template_path(self) -> str:
         """获取模板文件路径"""
         return self.config.get_template_path()
+
+    def normalize_action(self, action: str) -> str:
+        """
+        归一化工程类型，兼容 '大改', '大改造' 等变体
+        """
+        action = traditional_to_simplified(str(action or "")).replace(" ", "")
+        if action in ["大改", "大改造"]:
+            return "大改造"
+        if action in ["小改", "小改造"]:
+            return "小改造"
+        if action in ["中改", "中改造"]:
+            return "中改造"
+        return action

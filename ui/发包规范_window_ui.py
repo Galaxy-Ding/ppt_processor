@@ -21,13 +21,13 @@ class ProcessThread(QThread):
     error = pyqtSignal(str)
     log_signal = pyqtSignal(str)
     auto_info_signal = pyqtSignal(str, str)  # 新增，传递自动匹配的名称和类型
-    def __init__(self, processor, selected_dir, data_list=None, manual_proj_name_value=None, manual_proj_type_value=None):
+    def __init__(self, processor, selected_dir, data_list=None, manual_proj_name_value=None, manual_proj_action_value=None):
         super().__init__()
         self.processor = processor
         self.selected_dir = selected_dir
         self.data_list = data_list
         self.manual_proj_name_value = manual_proj_name_value
-        self.manual_proj_type_value = manual_proj_type_value
+        self.manual_proj_action_value = manual_proj_action_value
     def emit_log(self, msg):
         self.log_signal.emit(msg)
     def run(self):
@@ -35,14 +35,14 @@ class ProcessThread(QThread):
             self.processor.set_log_callback(self.emit_log)
             results = self.processor.process_generate_reports(
                 self.selected_dir, self.data_list,
-                self.manual_proj_name_value, self.manual_proj_type_value
+                self.manual_proj_name_value, self.manual_proj_action_value
             )
             # 假设只处理一个PPT，取第一个结果
             for pptx_path, output_path in results.items():
                 # 这里可以从processor里获取匹配结果
                 matched_name = self.processor.last_matched_name if hasattr(self.processor, "last_matched_name") else ""
-                matched_type = self.processor.last_matched_type if hasattr(self.processor, "last_matched_type") else ""
-                self.auto_info_signal.emit(matched_name, matched_type)
+                matched_action = self.processor.last_matched_action if hasattr(self.processor, "last_matched_action") else ""
+                self.auto_info_signal.emit(matched_name, matched_action)
                 break
             self.finished.emit(results)
         except Exception as e:
@@ -71,8 +71,8 @@ class DemoMainWindow(QMainWindow):
         # 新增：初始化手动输入的值
         self.manual_proj_name_value = ""
         # 设置 combobox 默认值为第0个
-        self.manual_proj_type.setCurrentIndex(0)
-        self.manual_proj_type_value = self.manual_proj_type.currentText()
+        self.manual_proj_action.setCurrentIndex(0)
+        self.manual_proj_action_value = self.manual_proj_action.currentText()
         # 设置 read_project_status 为只读
         self.read_project_status.setEnabled(False)
         self.data_list = self._read_from_local_excel()
@@ -154,9 +154,9 @@ class DemoMainWindow(QMainWindow):
         self.log_display = self.findChild(QTextEdit, "log_display")
         self.status_label = self.findChild(type(self.status_label), "status_label")
         self.manual_proj_name = self.findChild(QLineEdit, "manual_txt_proj_name")
-        self.manual_proj_type = self.findChild(QComboBox, "manual_proj_type_combo")
+        self.manual_proj_action = self.findChild(QComboBox, "manual_proj_action_combo")
         self.auto_proj_name = self.findChild(QLabel, "auto_proj_name_label")
-        self.auto_proj_type = self.findChild(QLabel, "auto_proj_type_label")
+        self.auto_proj_action = self.findChild(QLabel, "auto_proj_action_label")
         self.read_project_status = self.findChild(QCheckBox, "chBox_read_ProjectStatus") # 状态圆如用自定义控件可用
 
     def _connect_signals(self):
@@ -165,7 +165,7 @@ class DemoMainWindow(QMainWindow):
         self.log_level_combo.currentTextChanged.connect(self.change_log_level)
         # 新增：手动输入信号与槽函数绑定
         self.manual_proj_name.editingFinished.connect(self.on_manual_proj_name_changed)
-        self.manual_proj_type.currentTextChanged.connect(self.on_manual_proj_type_changed)
+        self.manual_proj_action.currentTextChanged.connect(self.on_manual_proj_action_changed)
 
     # 新增：手动输入槽函数
     def on_manual_proj_name_changed(self):
@@ -174,8 +174,8 @@ class DemoMainWindow(QMainWindow):
         self.logger.debug(f"手动工程名字输入: {value}")
         self.append_log(f"手动工程名字输入: {value}")
 
-    def on_manual_proj_type_changed(self, value):
-        self.manual_proj_type_value = value
+    def on_manual_proj_action_changed(self, value):
+        self.manual_proj_action_value = value
         self.logger.debug(f"手动工程类型选择: {value}")
         self.append_log(f"手动工程类型选择: {value}")
 
@@ -236,7 +236,7 @@ class DemoMainWindow(QMainWindow):
 
     def update_auto_info(self, name, action):
         self.auto_proj_name.setText(name)
-        self.auto_proj_type.setText(action)
+        self.auto_proj_action.setText(action)
 
     def _process_next_dir(self):
         if not self._pending_dirs:
@@ -255,7 +255,7 @@ class DemoMainWindow(QMainWindow):
             return
         # 启动后台线程
         self.process_thread = ProcessThread(self.processor, item, self.data_list,
-                                            self.manual_proj_name_value, self.manual_proj_type_value)
+                                            self.manual_proj_name_value, self.manual_proj_action_value)
         self.process_thread.finished.connect(self._on_single_process_finished)
         self.process_thread.error.connect(self._on_single_process_error)
         self.process_thread.log_signal.connect(self.append_log)
@@ -267,7 +267,7 @@ class DemoMainWindow(QMainWindow):
         if isinstance(results, dict):
             self._all_results.update(results)
             for dir_path, output_files in results.items():
-                self.logger.info(f"目录 {dir_path} 处理完成，生成 {len(output_files)} 个文件")
+                self.logger.info(f"目录 {dir_path} 处理完成，生成 {output_files}")
         self._process_next_dir()
 
     def _on_single_process_error(self, error_msg):
