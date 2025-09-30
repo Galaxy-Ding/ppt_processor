@@ -370,8 +370,10 @@ class PackingFileProcessor:
             matched_scheme_name = None
             matched_scheme_type = ""
             matched_scheme_action = ""
+            self.logger.debug(f"开始进行Excel匹配，ProjectCode: {project_code} & data_list 长度: {len(data_list) if data_list else 0}")
             if data_list and project_code:
                 for item in data_list:
+                    self.logger.debug(f"正在检查Excel项: {item.get('ProjectCode', '')}")
                     if str(item.get("ProjectCode", "")).strip() == str(project_code).strip():
                         matched_scheme_name = item.get("name")
                         matched_scheme_action = item.get("Action")

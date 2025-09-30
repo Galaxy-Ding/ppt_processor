@@ -1,23 +1,22 @@
-
-
 # 模板配置
 templates:
   docx:
     path: "examples/templates"  # 相对于root目录
     filename: "26xdemo1.docx"
   excel:
-    path: "examples"  # 相对于root目录
+    path: "examples"
     filename: "方案总表.xlsx"
     sheet_name: "Sheet1"
-    header_row_num: 4  # 标题行行号 第几行开始是标题行 比如第4行 就是 4
+    header_row_num: 4
 
 
 
 # 日志配置
 logs:
-  path: "logs"  # 相对于root目录
-  format: "%Y-%m-%d"  # 日期格式
+  log_dir: "logs"  # 相对于root目录
+  format: "%Y_%m_%d"  # 日期格式
   retention_days: 30  # 日志保留天数
+  level: "DEBUG"       # 默认日志等级，可选 DEBUG/INFO/WARNING/ERROR
 
 # 默认目录配置
 default_dirs:

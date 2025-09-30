@@ -8,9 +8,6 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QFileDialog,
                              QComboBox, QMessageBox, QLineEdit)
 from PyQt5 import uic
 from PyQt5.QtGui import QFont, QIcon
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QPainter, QColor
-from PyQt5.QtGui import QPainter, QColor
 from utils.logger import LoggerFactory, LOG_LEVELS, LEVEL_MAP
 from utils.resource import resource_path
 from config.loader import ConfigLoader
@@ -87,28 +84,35 @@ class DemoMainWindow(QMainWindow):
         ui_path = resource_path("ui/发包规范_window.ui")
         uic.loadUi(ui_path, self)
         self.setWindowTitle("发包规范一键生成工具")
-        # 设置窗口左上角图标
-        icon_path = resource_path("icon.ico")  # 假设你的图标文件名为 icon.ico
+        icon_path = resource_path("icon.ico")
         self.setWindowIcon(QIcon(icon_path))
 
         # 初始化配置和日志
         self.configs = ConfigLoader()
         self.logger = LoggerFactory.create_logger("DemoUI")
+        level = LoggerFactory.get_global_log_level()
         self.processor = None
         self.selected_dirs = []
+
+        # 显示日志目录
+        logs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "logs"))
+        self.append_log(f"日志目录: {logs_dir}")
 
         # 绑定控件
         self._bind_widgets()
         self._connect_signals()
-        # 美化界面
         self.apply_style()
+        
+        # 设置日志等级下拉框初始值
+
         self.processor = PackingFileProcessor(self.configs)
-        # 新增：初始化手动输入的值
+        for i in range(self.log_level_combo.count()):
+            if self.log_level_combo.itemText(i) == level:
+                self.log_level_combo.setCurrentIndex(i)
+                break
         self.manual_proj_name_value = ""
-        # 设置 combobox 默认值为第0个
         self.manual_proj_action.setCurrentIndex(0)
         self.manual_proj_action_value = self.manual_proj_action.currentText()
-        # 设置 read_project_status 为只读
         self.read_project_status.setEnabled(False)
         self.data_list = self._read_from_local_excel()
 
@@ -165,20 +169,6 @@ class DemoMainWindow(QMainWindow):
         """)
         font = QFont("Microsoft YaHei", 9)
         QApplication.setFont(font)
-
-    def setup_logger(self, log_config: dict = {}):
-        """设置日志记录器"""
-        if log_config:
-            log_path = log_config.get('path', '../logs')
-            os.makedirs(log_path, exist_ok=True)
-
-            return LoggerFactory.create_logger(
-                "PPTProcessorGUI",
-                log_level=log_config.get('level', 'INFO'),
-                log_file=os.path.join(log_path, 'ppt_processor.log'),
-                retention_days=log_config.get('retention_days', 30)
-            )
-
 
     def _bind_widgets(self):
         # 这些名称需与demo.ui中的objectName一致

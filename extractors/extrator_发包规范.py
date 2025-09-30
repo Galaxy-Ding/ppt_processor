@@ -17,9 +17,7 @@ from openpyxl.utils.exceptions import InvalidFileException
 from openpyxl.worksheet.worksheet import Worksheet  # 新增：导入 Worksheet 类
 from typing import List, Dict, Optional, Union
 from utils.exceptions import *
-# 获取当前文件的绝对路径的根目录
-current_file_path = Path(__file__).resolve()
-main_dir = current_file_path.parent.parent  # 项目根目录（ppt_processor/）
+
 
 
 class ExtractorExcel(BaseExtractor):
@@ -51,12 +49,20 @@ class ExtractorExcel(BaseExtractor):
         # 优化：只加载一次正则规则配置
         self.fields_config = config.config.get("FIELDS_CONFIG", {}).get("发包规范V2_EXCEL", {}).get("header", {})
         self.config = config.get_all_projects_info()
-        self.file_path = os.path.join(main_dir, self.config.get('path', 'examples'), self.config.get('filename', '方案总表.xlsx'))
-        self.sheet_name = self.config.get('sheet_name', '方案总表')
-        self.header_row_num = self.config.get('header_row_num', 4)
+
+        
+        # 直接用配置里的绝对路径
+        self.file_path = config.get_project_excel_path()
+        if not self.file_path:
+            raise ValueError("Excel 路径未在配置文件中指定，请检查 app_settings.yaml")
+        self.file_path = str(Path(self.file_path).resolve())
+
+        # 工作表名和标题行号
+        self.sheet_name = self.config.get("sheet_name", "Sheet1")
+        self.header_row_num = self.config.get("header_row_num", 4)
 
         self.logger = LoggerFactory.create_logger("ExtractorExcel")
-
+        self.logger.debug(f"excel file path: {self.file_path}")
         # 初始化工作簿和工作表（延迟加载，避免重复打开）
         self.wb: Optional[load_workbook] = None
         self.ws: Optional[Worksheet] = None
@@ -247,6 +253,7 @@ class ExtractorExcel(BaseExtractor):
         start_row = self.header_row_num + 1
         result = []
         for row in self.ws.iter_rows(min_row=start_row, values_only=True):
+            print(row)  
             # 跳过空行
             if all(cell is None for cell in row):
                 continue
@@ -587,6 +594,6 @@ def example_usage_extractor_a():
 
 
 if __name__ == "__main__":
-    # example_usage_excel()
-    example_usage_extractor_a()
+    example_usage_excel()
+    # example_usage_extractor_a()
     pass
