@@ -1,14 +1,18 @@
 import sys
 import os
+import re
+import traceback
+
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QFileDialog,
                              QPushButton, QLabel, QTextEdit, QCheckBox,
                              QComboBox, QMessageBox, QLineEdit)
 from PyQt5 import uic
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QIcon
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPainter, QColor
 from PyQt5.QtGui import QPainter, QColor
 from utils.logger import LoggerFactory, LOG_LEVELS, LEVEL_MAP
+from utils.resource import resource_path
 from config.loader import ConfigLoader
 from PyQt5.QtCore import QThread, pyqtSignal
 from extractors.extrator_发包规范 import ExtractorExcel
@@ -33,17 +37,45 @@ class ProcessThread(QThread):
     def run(self):
         try:
             self.processor.set_log_callback(self.emit_log)
-            results = self.processor.process_generate_reports(
-                self.selected_dir, self.data_list,
-                self.manual_proj_name_value, self.manual_proj_action_value
-            )
-            # 假设只处理一个PPT，取第一个结果
-            for pptx_path, output_path in results.items():
-                # 这里可以从processor里获取匹配结果
-                matched_name = self.processor.last_matched_name if hasattr(self.processor, "last_matched_name") else ""
-                matched_action = self.processor.last_matched_action if hasattr(self.processor, "last_matched_action") else ""
-                self.auto_info_signal.emit(matched_name, matched_action)
-                break
+            # 1. 获取所有PPT文件路径
+            pptx_paths = self.processor.get_v3_pptx_directories(self.selected_dir)
+            results = {}
+            
+            for pptx_path in pptx_paths:
+                try:
+                    dir_path = os.path.dirname(pptx_path)
+                    result_dir = self.processor._create_result_dir(dir_path)
+                    
+                    # 2. 提取PPT数据
+                    extracted_data = self.processor.extract_ppt_data(
+                        pptx_path, version="v1",
+                        data_list=self.data_list,
+                        manual_proj_name_value=self.manual_proj_name_value,
+                        manual_proj_action_value=self.manual_proj_action_value
+                    )
+                    
+                    # 3. 发送自动匹配信息到UI
+                    matched_name = extracted_data.get("name", "")
+                    matched_action = extracted_data.get("Action", "")
+                    self.auto_info_signal.emit(matched_name, matched_action)
+                    
+                    # 4. 生成输出文件名
+                    filename = os.path.basename(pptx_path)
+                    base_name = os.path.splitext(filename)[0]
+                    v3_pattern = re.compile(r'^(.*?)[vV]3')
+                    match = v3_pattern.search(base_name)
+                    prefix = match.group(1).strip('_') if match else base_name
+                    output_filename = f"{prefix}_v1_发包规范.docx"
+                    output_path = os.path.join(result_dir, output_filename)
+                    
+                    # 5. 导出文档
+                    success = self.processor.export_to_docx(pptx_path, output_path, extracted_data)
+                    if success:
+                        results[pptx_path] = output_path
+                        
+                except Exception as e:
+                    self.emit_log(f"处理文件 {pptx_path} 失败: {str(e)}\n{traceback.format_exc()}")
+                    
             self.finished.emit(results)
         except Exception as e:
             self.error.emit(str(e))
@@ -52,9 +84,12 @@ class ProcessThread(QThread):
 class DemoMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        # 加载UI
-        uic.loadUi("ui/发包规范_window.ui", self)
+        ui_path = resource_path("ui/发包规范_window.ui")
+        uic.loadUi(ui_path, self)
         self.setWindowTitle("发包规范一键生成工具")
+        # 设置窗口左上角图标
+        icon_path = resource_path("icon.ico")  # 假设你的图标文件名为 icon.ico
+        self.setWindowIcon(QIcon(icon_path))
 
         # 初始化配置和日志
         self.configs = ConfigLoader()

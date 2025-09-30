@@ -9,13 +9,16 @@ pip install --upgrade pyinstaller
 pyinstaller --noconfirm --onefile --windowed `
     --icon=.\icon.ico `
     --name $exeName `
-    --add-data "config;." `
+    --add-data "icon.ico;." `
+    --add-data "config;config" `
     --add-data "examples;examples" `
     --add-data "exporters;exporters" `
     --add-data "extractors;extractors" `
     --add-data "ui;ui" `
     --add-data "utils;utils" `
+    --add-data "core;core" `
     --add-data "content_models.py;." `
+    --add-data "C:\Users\CAA\.conda\envs\py39\Lib\site-packages\zhconv;zhconv" `
     --add-data "ppt_reader.py;." `
     main.py
 

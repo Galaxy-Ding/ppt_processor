@@ -116,12 +116,11 @@ class PackingFileProcessor:
             result_dirs[pptx_path] = output_path
         return result_dirs
 
-    def process_ppt_to_docx(self, pptx_path: str, docx_path: str, output_path: str, version: str = "v1",
+    def process_ppt_to_docx(self, pptx_path: str, output_path: str, version: str = "v1",
                            data_list=None, manual_proj_name_value=None, manual_proj_action_value=None):
         """
         应用层统一入口：处理PPT，提取信息并生成文档
         :param pptx_path: PPTX文件路径
-        :param docx_path: DOCX模板路径
         :param output_path: 输出DOCX路径
         :param version: 版本号
         :param data_list: Excel结构化数据
@@ -194,7 +193,7 @@ class PackingFileProcessor:
         # OSSDate 固定为0
         result["OSSDate"] = "0"
 
-        exporter = ExporterA(pptx_path, docx_path, output_path)
+        exporter = ExporterA(pptx_path, self.get_template_path(), output_path)
         success = exporter.process(result)
         if success:
             self._log(f"\n文档已成功生成: {output_path}", level="INFO")
@@ -280,7 +279,7 @@ class PackingFileProcessor:
         output_filename = f"{prefix}_v1_发包规范.docx"
         output_path = os.path.join(output_dir, output_filename)
         self.process_ppt_to_docx(
-            ppt_path, self.get_template_path(), output_path, version="v1",
+            ppt_path, output_path, version="v1",
             data_list=data_list,
             manual_proj_name_value=manual_proj_name_value,
             manual_proj_action_value=manual_proj_action_value
@@ -305,3 +304,133 @@ class PackingFileProcessor:
         if action in ["中改", "中改造"]:
             return "中改造"
         return action
+    
+    def get_matching_info(self, pptx_path, data_list, manual_proj_name_value, manual_proj_action_value):
+        """
+        返回匹配的工程名称和类型（安全用于前端线程）
+        """
+        slides = self._read_pptx(pptx_path)
+        slides_dicts = [slide.to_dict() for slide in slides]
+        extractor = ExtractorA(slides_dicts, self.config)
+        result = extractor.extract()
+        project_code = result.get("ProjectCode")
+        matched_scheme_name = None
+        matched_scheme_action = None
+        if data_list and project_code:
+            for item in data_list:
+                if str(item.get("ProjectCode", "")).strip() == str(project_code).strip():
+                    matched_scheme_name = item.get("name")
+                    matched_scheme_action = item.get("Action")
+                    matched_scheme_type = item.get("type")
+                    break
+        # 优先返回匹配到的，否则用手动输入
+        name = matched_scheme_name if matched_scheme_name else manual_proj_name_value or "未匹配到"
+        action = matched_scheme_action if matched_scheme_action else manual_proj_action_value or "未匹配到"
+        return name, action, matched_scheme_type
+
+    def extract_ppt_data(self, pptx_path: str, version: str = "v1",
+                        data_list=None, manual_proj_name_value=None, manual_proj_action_value=None) -> dict:
+        """
+        新增函数：提取PPT数据并匹配Excel信息
+        """
+        return self.process_ppt_to_docx(
+            pptx_path, "", version, 
+            data_list, manual_proj_name_value, manual_proj_action_value,
+            export=False
+        )
+
+    def export_to_docx(self, pptx_path: str, output_path: str, extracted_data: dict) -> bool:
+        """
+        新增函数：将提取的数据导出为docx文档
+        """
+        return self.process_ppt_to_docx(
+            pptx_path, output_path, "v1",
+            None, None, None,
+            extracted_data=extracted_data
+        )
+
+    def process_ppt_to_docx(self, pptx_path: str, output_path: str, version: str = "v1",
+                           data_list=None, manual_proj_name_value=None, manual_proj_action_value=None,
+                           export=True, extracted_data=None):
+        """
+        修改原函数：添加export和extracted_data参数，支持分步操作
+        """
+        if extracted_data is None:
+            # 读取PPT并结构化
+            slides = self._read_pptx(pptx_path, version)
+            slides_dicts = [slide.to_dict() for slide in slides]
+            # 提取需要的信息
+            extractor = ExtractorA(slides_dicts, self.config)
+            result = extractor.extract()
+            self.logger.debug("\n发包规范字段提取结果:")
+            self.logger.debug(str(result))
+
+            # Excel数据匹配逻辑
+            project_code = result.get("ProjectCode")
+            matched_scheme_name = None
+            matched_scheme_type = ""
+            matched_scheme_action = ""
+            if data_list and project_code:
+                for item in data_list:
+                    if str(item.get("ProjectCode", "")).strip() == str(project_code).strip():
+                        matched_scheme_name = item.get("name")
+                        matched_scheme_action = item.get("Action")
+                        matched_scheme_type = item.get("type")
+                        break
+
+            # 匹配成功
+            if matched_scheme_name:
+                self.logger.debug(f"{project_code} 匹配到 方案總表的方案代碼\n")
+                result["name"] = matched_scheme_name
+                result["Action"] = matched_scheme_action
+                self.last_matched_name = matched_scheme_name
+                self.last_matched_action = matched_scheme_action
+            else:
+                # 未匹配到
+                self.logger.debug(f"{project_code} 采用 手動的名稱和Action\n")
+                result["name"], result["Action"] = "", ""
+                self.last_matched_name = "未匹配到"
+                self.last_matched_action = "未匹配到"
+                # 手动输入覆盖
+                if manual_proj_name_value:
+                    result["name"] = manual_proj_name_value
+                if manual_proj_action_value:
+                    result["Action"] = manual_proj_action_value
+
+            # 读取配置
+            config_dict = self.config.config.get("FIELDS_CONFIG", {})
+            install_days_config = config_dict.get("发包规范V1_InstalledDate", {})
+            lq_days_config = config_dict.get("发包规范V1_LQStartDate", {})
+
+            action_value = traditional_to_simplified(result.get("Action", ""))
+            action_value = self.normalize_action(action_value)
+            scheme_type_value = traditional_to_simplified(matched_scheme_type or "")
+
+            # InstalledDate
+            result["InstalledDate"] = str(install_days_config.get(action_value, ""))
+
+            # LQStartDate
+            lq_days = ""
+            if scheme_type_value and scheme_type_value in lq_days_config:
+                lq_type_dict = lq_days_config[scheme_type_value]
+                lq_days = lq_type_dict.get(action_value, "")
+            else:
+                # 若无类型，直接用Action对应的默认LQStartDate
+                lq_days = install_days_config.get(action_value, "")
+            result["LQStartDate"] = str(lq_days)
+
+            # OSSDate 固定为0
+            result["OSSDate"] = "0"
+
+            if not export:
+                return result
+
+            extracted_data = result
+
+        exporter = ExporterA(pptx_path, self.get_template_path(), output_path)
+        success = exporter.process(extracted_data)
+        if success:
+            self._log(f"\n文档已成功生成: {output_path}", level="INFO")
+        else:
+            self._log("\n文档生成失败", level="INFO")
+        return success

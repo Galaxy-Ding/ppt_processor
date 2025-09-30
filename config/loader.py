@@ -38,8 +38,9 @@ class ConfigLoader:
     def get_template_path(self) -> str:
         """获取模板文件路径"""
         templates = self.config.get('templates', {})
-        docx_path = templates.get('docx', {}).get('path', 'templates')
-        filename = templates.get('docx', {}).get('filename', '')
+        docx_config = templates.get('docx', {})
+        docx_path = docx_config.get('path', 'templates')
+        filename = docx_config.get('filename', '')
         return os.path.join(docx_path, filename)
     
     def get_all_projects_info(self) -> dict:

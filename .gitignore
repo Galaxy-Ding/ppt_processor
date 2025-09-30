@@ -1,8 +1,33 @@
-# filepath: d:\pythonf\ppt_processor\.gitignore
-.temp/
-*/__pycache__/
+# Python cache and temp files
+__pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# IDE/project files
 .idea/
-.temp/logs/
+.vscode/
+*.swp
+
+# Logs and temp folders
 *.log
-*/.gitignore
+logs/
+.temp/
+.temp/logs/
+
+# Qt UI generated files
+ui/*.pyc
+ui/*.bak
+ui/*.log
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Git itself
+.gitignore
+
+# Environment files
+.env
+.venv/
+venv/
